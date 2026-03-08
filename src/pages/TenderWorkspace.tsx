@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
@@ -9,7 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   ArrowLeft, FileText, AlertTriangle, CheckSquare, BookOpen, Edit, List,
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
-  Loader2, Info,
+  Loader2, Info, RotateCcw, RefreshCw, AlertCircle,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
