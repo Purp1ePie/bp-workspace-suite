@@ -140,6 +140,46 @@ export default function TenderWorkspace() {
     }
   };
 
+  const handleUpdateMatchStatus = async (matchId: string, status: 'accepted' | 'rejected') => {
+    const { error } = await supabase.from('requirement_matches').update({ status }).eq('id', matchId);
+    if (error) {
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
+    } else {
+      setMatches(prev => prev.map(m => m.id === matchId ? { ...m, status } : m));
+    }
+  };
+
+  const [matchingInProgress, setMatchingInProgress] = useState(false);
+  const handleRetryMatching = async () => {
+    if (!id) return;
+    setMatchingInProgress(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active session');
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/match-knowledge-assets`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ tender_id: id }),
+        }
+      );
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || `Matching failed: ${response.status}`);
+      toast({ title: 'Knowledge matching complete', description: `${result.inserted_matches || 0} matches found` });
+      await loadData();
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setMatchingInProgress(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
