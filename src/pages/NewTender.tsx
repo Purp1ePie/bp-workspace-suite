@@ -357,8 +357,8 @@ export default function NewTender() {
           )}
         </div>
 
-        <Button type="submit" className="w-full h-11" disabled={uploadState === 'uploading' || !title}>
-          {uploadState === 'uploading' ? (
+        <Button type="submit" className="w-full h-11" disabled={flowState === 'uploading' || !title}>
+          {flowState === 'uploading' ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               {t('tender.creating')}
