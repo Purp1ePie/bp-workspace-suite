@@ -91,6 +91,9 @@ const translations = {
   'tender.created': { de: 'Ausschreibung erstellt', en: 'Tender created' },
   'tender.createdDescription': { de: 'Dokumente werden verarbeitet...', en: 'Documents are being processed...' },
   'tender.goToWorkspace': { de: 'Zum Workspace', en: 'Go to Workspace' },
+  'tender.processingTender': { de: 'Ausschreibung wird analysiert...', en: 'Processing tender...' },
+  'tender.processingDescription': { de: 'Die KI analysiert Ihre Dokumente. Dies kann einen Moment dauern.', en: 'AI is analyzing your documents. This may take a moment.' },
+  'workspace.retryProcessing': { de: 'Verarbeitung wiederholen', en: 'Retry Processing' },
 
   // Workspace tabs
   'workspace.overview': { de: 'Übersicht', en: 'Overview' },
