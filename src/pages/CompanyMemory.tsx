@@ -84,13 +84,13 @@ export default function CompanyMemory() {
       }
 
       const tags = assetTags.split(',').map(t => t.trim()).filter(Boolean);
-      const { error } = await supabase.from('knowledge_assets').insert({
+      const { data: insertedRow, error } = await supabase.from('knowledge_assets').insert({
         title: assetTitle,
         asset_type: assetType,
         organization_id: orgId,
         storage_path: storagePath,
         tags,
-      });
+      }).select('id').single();
       if (error) throw error;
 
       toast({ title: t('common.success') });
@@ -99,6 +99,25 @@ export default function CompanyMemory() {
       setAssetTags('');
       setFile(null);
       loadAssets();
+
+      // Trigger processing via Edge Function
+      if (insertedRow?.id) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+        if (!accessToken) {
+          toast({ title: 'Auth error', description: 'No active session. Please sign in again.', variant: 'destructive' });
+          return;
+        }
+        const { error: fnError } = await supabase.functions.invoke('process-knowledge-assets', {
+          body: { knowledge_asset_id: insertedRow.id },
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (fnError) {
+          console.error('process-knowledge-assets error:', fnError);
+          toast({ title: 'Processing failed', description: fnError.message || 'Could not process asset.', variant: 'destructive' });
+        }
+        loadAssets();
+      }
     } catch (err: any) {
       toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
     } finally {
