@@ -555,36 +555,140 @@ export default function TenderWorkspace() {
 
         {/* KNOWLEDGE MATCHES */}
         {activeTab === 'knowledge' && (
-          requirements.length === 0 ? (
-            <EmptyState icon={BookOpen} title={t('workspace.noKnowledge')} description={t('workspace.knowledgeHint')} />
-          ) : (
-            <div className="space-y-4">
-              <div className="glass-card p-4 border-info/20 bg-info/5 flex items-start gap-3">
-                <Info className="h-4 w-4 text-info shrink-0 mt-0.5" />
-                <p className="text-sm text-muted-foreground">{t('workspace.knowledgeHint')}</p>
+          <div className="space-y-4">
+            {/* Header with retry button */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span>{matches.length} matches across {requirements.length} requirements</span>
               </div>
-              {requirements.slice(0, 8).map((req) => (
-                <div key={req.id} className="glass-card p-5">
-                  <div className="grid lg:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{t('workspace.requirement')}</p>
-                      <p className="text-sm leading-relaxed">{req.text}</p>
-                      {req.mandatory && (
-                        <span className="inline-block mt-2 text-[10px] px-2 py-0.5 rounded-full bg-destructive/15 text-destructive font-semibold uppercase">{t('workspace.mandatory')}</span>
-                      )}
-                    </div>
-                    <div className="border-t lg:border-t-0 lg:border-l border-border pt-4 lg:pt-0 lg:pl-4">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{t('workspace.suggestedAssets')}</p>
-                      <div className="flex flex-col items-center justify-center py-6 text-center">
-                        <BookOpen className="h-5 w-5 text-muted-foreground/50 mb-1" />
-                        <p className="text-xs text-muted-foreground">—</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+              <Button size="sm" variant="outline" onClick={handleRetryMatching} disabled={matchingInProgress}>
+                {matchingInProgress ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                Re-run matching
+              </Button>
             </div>
-          )
+
+            {matches.length === 0 ? (
+              <EmptyState
+                icon={BookOpen}
+                title="No knowledge matches yet"
+                description="No relevant company knowledge was matched to tender requirements. Upload assets in Company Memory or re-run matching."
+                action={
+                  <Button size="sm" variant="outline" onClick={handleRetryMatching} disabled={matchingInProgress}>
+                    {matchingInProgress ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                    Run matching
+                  </Button>
+                }
+              />
+            ) : (
+              (() => {
+                // Group matches by requirement
+                const assetMap = new Map(knowledgeAssets.map(a => [a.id, a]));
+                const grouped = new Map<string, { req: Requirement; matches: RequirementMatch[] }>();
+                for (const req of requirements) {
+                  const reqMatches = matches.filter(m => m.requirement_id === req.id);
+                  if (reqMatches.length > 0) {
+                    grouped.set(req.id, { req, matches: reqMatches });
+                  }
+                }
+                // Requirements with no matches
+                const unmatchedReqs = requirements.filter(r => !grouped.has(r.id));
+
+                return (
+                  <div className="space-y-4">
+                    {Array.from(grouped.values()).map(({ req, matches: reqMatches }) => (
+                      <div key={req.id} className="glass-card overflow-hidden">
+                        {/* Requirement header */}
+                        <div className="px-5 py-3.5 border-b border-border surface-2">
+                          <p className="text-sm leading-relaxed">{req.text}</p>
+                          <div className="flex items-center gap-2 mt-2">
+                            {req.mandatory && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-destructive/15 text-destructive font-semibold uppercase tracking-wider">
+                                Mandatory
+                              </span>
+                            )}
+                            {req.category && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium flex items-center gap-1">
+                                <Tag className="h-2.5 w-2.5" />
+                                {req.category}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {/* Matched assets */}
+                        <div className="divide-y divide-border">
+                          {reqMatches.map(match => {
+                            const asset = assetMap.get(match.knowledge_asset_id);
+                            const statusColors: Record<string, string> = {
+                              suggested: 'bg-primary/10 text-primary',
+                              accepted: 'bg-success/15 text-success',
+                              rejected: 'bg-destructive/15 text-destructive',
+                            };
+                            return (
+                              <div key={match.id} className="px-5 py-3.5 flex items-center gap-4">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-sm font-medium truncate">{asset?.title || 'Unknown asset'}</p>
+                                    {asset?.asset_type && (
+                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium capitalize shrink-0">
+                                        {asset.asset_type.replace('_', ' ')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    <span className="text-xs text-muted-foreground">
+                                      Confidence: <span className="font-semibold text-foreground">{match.confidence_score}%</span>
+                                    </span>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${statusColors[match.status] || 'bg-muted text-muted-foreground'}`}>
+                                      {match.status}
+                                    </span>
+                                  </div>
+                                </div>
+                                {match.status === 'suggested' && (
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 text-success hover:bg-success/10 hover:text-success"
+                                      onClick={() => handleUpdateMatchStatus(match.id, 'accepted')}
+                                    >
+                                      <Check className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                      onClick={() => handleUpdateMatchStatus(match.id, 'rejected')}
+                                    >
+                                      <XIcon className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+
+                    {unmatchedReqs.length > 0 && (
+                      <div className="glass-card p-4 border-muted">
+                        <p className="text-xs text-muted-foreground mb-2">{unmatchedReqs.length} requirements with no matches</p>
+                        <div className="space-y-1.5">
+                          {unmatchedReqs.slice(0, 5).map(r => (
+                            <p key={r.id} className="text-xs text-muted-foreground/70 truncate">• {r.text}</p>
+                          ))}
+                          {unmatchedReqs.length > 5 && (
+                            <p className="text-xs text-muted-foreground/50">+{unmatchedReqs.length - 5} more</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
+            )}
+          </div>
         )}
 
         {/* DRAFT */}
