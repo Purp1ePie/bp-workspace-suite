@@ -50,7 +50,7 @@ function ParseStatusIndicator({ status }: { status: string }) {
   );
 }
 
-  const { t, language } = useI18n();
+  export default function CompanyMemory() {
   const { toast } = useToast();
   const dateFnsLocale = language === 'de' ? de : enUS;
   const fileInputRef = useRef<HTMLInputElement>(null);
