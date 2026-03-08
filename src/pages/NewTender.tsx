@@ -50,10 +50,11 @@ export default function NewTender() {
   const [tenderLanguage, setTenderLanguage] = useState('de');
   const [simapLink, setSimapLink] = useState('');
   const [files, setFiles] = useState<File[]>([]);
-  const [uploadState, setUploadState] = useState<UploadState>('idle');
+  const [flowState, setFlowState] = useState<FlowState>('idle');
   const [dragOver, setDragOver] = useState(false);
   const [createdTenderId, setCreatedTenderId] = useState<string | null>(null);
   const [uploadedCount, setUploadedCount] = useState(0);
+  const [processingError, setProcessingError] = useState<string | null>(null);
 
   const handleFiles = (newFiles: FileList | File[]) => {
     setFiles(prev => [...prev, ...Array.from(newFiles)]);
