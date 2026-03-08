@@ -137,7 +137,7 @@ export default function AppLayout() {
             <button onClick={() => setMobileOpen(true)} className="md:hidden">
               <Menu className="h-5 w-5 text-foreground" />
             </button>
-            <span className="md:hidden font-heading font-bold text-sm text-gradient">BidPilot</span>
+            <span className="md:hidden"><BidPilotLogo className="text-sm" /></span>
           </div>
 
           <div className="flex items-center gap-2">
