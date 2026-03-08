@@ -2,6 +2,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useI18n } from '@/lib/i18n';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+import { BidPilotLogo } from '@/components/BidPilotLogo';
 import {
   LayoutDashboard,
   FolderPlus,
@@ -67,7 +68,7 @@ export default function AppLayout() {
     <div className="flex flex-col h-full">
       {/* Brand */}
       <div className="px-5 py-5 border-b border-sidebar-border">
-        <h1 className="text-lg font-bold font-heading text-gradient tracking-tight">BidPilot</h1>
+        <BidPilotLogo className="text-lg" />
         {orgName && (
           <div className="flex items-center gap-1.5 mt-1.5">
             <Building2 className="h-3 w-3 text-sidebar-foreground/60" />
@@ -136,7 +137,7 @@ export default function AppLayout() {
             <button onClick={() => setMobileOpen(true)} className="md:hidden">
               <Menu className="h-5 w-5 text-foreground" />
             </button>
-            <span className="md:hidden font-heading font-bold text-sm text-gradient">BidPilot</span>
+            <span className="md:hidden"><BidPilotLogo className="text-sm" /></span>
           </div>
 
           <div className="flex items-center gap-2">

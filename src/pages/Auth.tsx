@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useI18n } from '@/lib/i18n';
+import { BidPilotLogo } from '@/components/BidPilotLogo';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,8 +63,8 @@ export default function Auth() {
           <LanguageSwitcher />
         </div>
         <div className="max-w-md">
-          <h1 className="text-4xl font-bold font-heading tracking-tight mb-4">
-            <span className="text-gradient">BidPilot</span>
+          <h1 className="text-4xl mb-4">
+            <BidPilotLogo className="text-4xl" />
           </h1>
           <p className="text-lg text-muted-foreground leading-relaxed">
             {t('auth.subtitle')}
