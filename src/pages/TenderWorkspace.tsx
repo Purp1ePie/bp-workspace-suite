@@ -206,6 +206,7 @@ export default function TenderWorkspace() {
     documents: docs.length,
     requirements: requirements.length,
     risks: risks.length + deadlines.length,
+    knowledge: matches.length,
     draft: sections.length,
     checklist: checklist.length,
   };
