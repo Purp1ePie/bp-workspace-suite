@@ -15,6 +15,8 @@ serve(async (req) => {
     console.log("process-tender invoked");
 
     const authHeader = req.headers.get("Authorization");
+    console.log("Authorization header present:", !!authHeader);
+
     if (!authHeader) {
       console.error("Missing Authorization header");
       return new Response(
@@ -27,12 +29,12 @@ serve(async (req) => {
     }
 
     const token = authHeader.replace("Bearer ", "");
+    console.log("Token extracted:", !!token);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const publishableKey = Deno.env.get("SB_PUBLISHABLE_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Client used only to validate the caller and apply RLS
     const authClient = createClient(supabaseUrl, publishableKey, {
       global: {
         headers: {
@@ -41,10 +43,8 @@ serve(async (req) => {
       },
     });
 
-    // Admin client used only after authorization succeeds
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Validate JWT
     const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(token);
 
     if (claimsError || !claimsData?.claims?.sub) {
@@ -65,6 +65,7 @@ serve(async (req) => {
     console.log("process-tender payload:", { tender_id });
 
     if (!tender_id) {
+      console.error("Missing tender_id");
       return new Response(
         JSON.stringify({ error: "Missing tender_id" }),
         {
@@ -74,7 +75,6 @@ serve(async (req) => {
       );
     }
 
-    // Read the user's profile through RLS-aware client
     const { data: profile, error: profileError } = await authClient
       .from("profiles")
       .select("id, organization_id")
@@ -94,7 +94,6 @@ serve(async (req) => {
 
     console.log("Caller organization:", profile.organization_id);
 
-    // Load tender through admin client
     const { data: tender, error: tenderError } = await adminClient
       .from("tenders")
       .select("id, organization_id, title, status")
@@ -112,7 +111,6 @@ serve(async (req) => {
       );
     }
 
-    // Enforce same-organization access
     if (tender.organization_id !== profile.organization_id) {
       console.error("Forbidden: tender belongs to different organization");
       return new Response(
@@ -131,6 +129,8 @@ serve(async (req) => {
       .update({ status: "analyzing" })
       .eq("id", tender_id);
 
+    console.log("Loading tender documents");
+
     const { data: documents, error: docsError } = await adminClient
       .from("tender_documents")
       .select("id, file_name, parse_status")
@@ -147,9 +147,11 @@ serve(async (req) => {
       );
     }
 
-    console.log("Found documents:", documents?.length ?? 0);
+    console.log("Found documents:", documents?.length ?? 0, documents);
 
     if (!documents || documents.length === 0) {
+      console.log("No documents found, marking tender ready_for_review");
+
       await adminClient
         .from("tenders")
         .update({ status: "ready_for_review" })
@@ -170,13 +172,17 @@ serve(async (req) => {
 
     const documentIds = documents.map((doc) => doc.id);
 
+    console.log("Marking documents as processing", documentIds);
     await adminClient
       .from("tender_documents")
       .update({ parse_status: "processing" })
       .in("id", documentIds);
 
+    console.log("Simulating parsing for documents");
     for (const doc of documents) {
       const placeholderText = `Parsed placeholder text for ${doc.file_name}. This is the first version of BidPilot document processing.`;
+
+      console.log("Parsing document:", doc.id, doc.file_name);
 
       await adminClient
         .from("tender_documents")
@@ -186,6 +192,8 @@ serve(async (req) => {
         })
         .eq("id", doc.id);
     }
+
+    console.log("Checking for existing requirements, deadlines and risks");
 
     const { count: existingRequirements } = await adminClient
       .from("requirements")
@@ -202,7 +210,15 @@ serve(async (req) => {
       .select("*", { count: "exact", head: true })
       .eq("tender_id", tender_id);
 
+    console.log("Existing counts:", {
+      existingRequirements,
+      existingDeadlines,
+      existingRisks,
+    });
+
     if (!existingRequirements || existingRequirements === 0) {
+      console.log("Inserting sample requirements");
+
       await adminClient.from("requirements").insert([
         {
           tender_id,
@@ -226,9 +242,13 @@ serve(async (req) => {
           mandatory: false,
         },
       ]);
+    } else {
+      console.log("Skipping requirements insert, already exist");
     }
 
     if (!existingDeadlines || existingDeadlines === 0) {
+      console.log("Inserting sample deadline");
+
       const dueAt = new Date();
       dueAt.setDate(dueAt.getDate() + 7);
 
@@ -241,9 +261,13 @@ serve(async (req) => {
           description: "Sample extracted submission deadline",
         },
       ]);
+    } else {
+      console.log("Skipping deadline insert, already exists");
     }
 
     if (!existingRisks || existingRisks === 0) {
+      console.log("Inserting sample risk");
+
       await adminClient.from("risks").insert([
         {
           tender_id,
@@ -253,12 +277,20 @@ serve(async (req) => {
           description: "Tender may require additional clarification on scope and deliverables.",
         },
       ]);
+    } else {
+      console.log("Skipping risk insert, already exists");
     }
 
+    console.log("Marking tender ready_for_review");
     await adminClient
       .from("tenders")
       .update({ status: "ready_for_review" })
       .eq("id", tender_id);
+
+    console.log("Tender processed successfully", {
+      tender_id,
+      processed_documents: documents.length,
+    });
 
     return new Response(
       JSON.stringify({
