@@ -14,8 +14,8 @@ export default {
     },
     extend: {
       fontFamily: {
-        heading: ["Space Grotesk", "sans-serif"],
-        body: ["DM Sans", "sans-serif"],
+        heading: ["Inter", "sans-serif"],
+        body: ["Inter", "sans-serif"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -93,8 +93,8 @@ export default {
           to: { opacity: "1", transform: "translateY(0)" },
         },
         "pulse-glow": {
-          "0%, 100%": { boxShadow: "0 0 8px hsl(172 66% 50% / 0.2)" },
-          "50%": { boxShadow: "0 0 20px hsl(172 66% 50% / 0.4)" },
+          "0%, 100%": { boxShadow: "0 0 8px hsl(217 91% 60% / 0.2)" },
+          "50%": { boxShadow: "0 0 20px hsl(217 91% 60% / 0.4)" },
         },
       },
       animation: {
