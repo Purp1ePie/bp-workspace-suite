@@ -81,10 +81,28 @@ export default function NewTender() {
 
   const handleDragLeave = useCallback(() => setDragOver(false), []);
 
+  const invokeProcessTender = async (tenderId: string) => {
+    setFlowState('processing');
+    setProcessingError(null);
+    console.log('[BidPilot] Invoking process-tender for:', tenderId);
+    try {
+      const result = await callProcessTender(tenderId);
+      console.log('[BidPilot] process-tender result:', result);
+      setFlowState('ready');
+      toast({ title: t('tender.created'), description: t('tender.createdDescription') });
+    } catch (err: any) {
+      console.error('[BidPilot] process-tender error:', err);
+      setProcessingError(err.message);
+      setFlowState('failed');
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setUploadState('uploading');
+    setFlowState('uploading');
     setUploadedCount(0);
+    setProcessingError(null);
 
     try {
       const { data: orgData } = await supabase.rpc('current_organization_id');
@@ -105,8 +123,9 @@ export default function NewTender() {
         .single();
 
       if (tenderErr) throw tenderErr;
+      console.log('[BidPilot] Tender created:', tender.id);
 
-      // Response sections and checklist items are auto-created by the seed_tender_defaults trigger
+      setCreatedTenderId(tender.id);
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -125,12 +144,13 @@ export default function NewTender() {
         }
         setUploadedCount(i + 1);
       }
+      console.log('[BidPilot] Files uploaded:', files.length);
 
-      setCreatedTenderId(tender.id);
-      setUploadState('success');
-      toast({ title: t('tender.created'), description: t('tender.createdDescription') });
+      // Invoke the real Edge Function
+      await invokeProcessTender(tender.id);
     } catch (err: any) {
-      setUploadState('idle');
+      console.error('[BidPilot] Submit error:', err);
+      setFlowState('idle');
       toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
     }
   };
