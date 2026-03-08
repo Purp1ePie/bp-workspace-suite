@@ -160,7 +160,9 @@ export default function TenderWorkspace() {
   const completedChecklist = checklist.filter(c => c.status === 'done').length;
   const mandatoryReqs = requirements.filter(r => r.mandatory).length;
   const pendingDocs = docs.filter(d => d.parse_status === 'pending' || d.parse_status === 'processing').length;
-  const allDocsParsed = docs.length > 0 && pendingDocs === 0;
+  const failedDocs = docs.filter(d => d.parse_status === 'failed').length;
+  const allDocsParsed = docs.length > 0 && pendingDocs === 0 && failedDocs === 0;
+  const isProcessing = tender.status === 'new' || tender.status === 'analyzing' || pendingDocs > 0;
 
   return (
     <div className="animate-fade-in">
