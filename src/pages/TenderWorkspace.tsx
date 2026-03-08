@@ -175,6 +175,41 @@ export default function TenderWorkspace() {
   };
 
   const [matchingInProgress, setMatchingInProgress] = useState(false);
+  const [generatingResponse, setGeneratingResponse] = useState(false);
+
+  const handleGenerateResponse = async () => {
+    if (!id) return;
+    setGeneratingResponse(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active session');
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-response`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ tender_id: id }),
+        }
+      );
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || `Generation failed: ${response.status}`);
+      toast({
+        title: 'Response generated',
+        description: `${result.sections_generated} sections drafted, ${result.gaps_found} gaps found, fit score: ${result.fit_score}%`,
+      });
+      await loadData();
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setGeneratingResponse(false);
+    }
+  };
+
   const handleRetryMatching = async () => {
     if (!id) return;
     setMatchingInProgress(true);
@@ -725,10 +760,20 @@ export default function TenderWorkspace() {
         {/* DRAFT */}
         {activeTab === 'draft' && (
           sections.length === 0 ? (
-            <EmptyState icon={Edit} title={t('workspace.noDraft')} />
+            <EmptyState
+              icon={Edit}
+              title={t('workspace.noDraft')}
+              description={requirements.length > 0 ? 'Use AI to draft response sections based on your requirements and matched knowledge assets.' : 'Process the tender first to extract requirements.'}
+              action={requirements.length > 0 ? (
+                <Button size="sm" variant="outline" onClick={handleGenerateResponse} disabled={generatingResponse}>
+                  {generatingResponse ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                  Generate AI Draft
+                </Button>
+              ) : undefined}
+            />
           ) : (
             <div className="space-y-4">
-              {/* Draft progress */}
+              {/* Draft progress + generate button */}
               <div className="glass-card p-4 flex items-center gap-4">
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1.5">
@@ -737,6 +782,10 @@ export default function TenderWorkspace() {
                   </div>
                   <Progress value={sections.length > 0 ? (draftedSections / sections.length) * 100 : 0} className="h-1.5" />
                 </div>
+                <Button size="sm" variant="outline" onClick={handleGenerateResponse} disabled={generatingResponse}>
+                  {generatingResponse ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                  {sections.length > 0 ? 'Re-generate' : 'Generate AI Draft'}
+                </Button>
               </div>
 
               {sections.map(s => (
@@ -756,7 +805,17 @@ export default function TenderWorkspace() {
         {/* CHECKLIST */}
         {activeTab === 'checklist' && (
           checklist.length === 0 ? (
-            <EmptyState icon={CheckSquare} title={t('workspace.noChecklist')} />
+            <EmptyState
+              icon={CheckSquare}
+              title={t('workspace.noChecklist')}
+              description={requirements.length > 0 ? 'Generate a response draft to auto-create checklist items from requirements, deadlines, and risks.' : undefined}
+              action={requirements.length > 0 ? (
+                <Button size="sm" variant="outline" onClick={() => { handleGenerateResponse(); setActiveTab('draft'); }} disabled={generatingResponse}>
+                  {generatingResponse ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                  Generate AI Draft & Checklist
+                </Button>
+              ) : undefined}
+            />
           ) : (
             <div className="space-y-4">
               {/* Readiness card */}

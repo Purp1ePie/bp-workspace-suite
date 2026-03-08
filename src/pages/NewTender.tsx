@@ -102,6 +102,15 @@ export default function NewTender() {
         toast({ title: 'Knowledge matching skipped', description: matchErr.message, variant: 'destructive' });
       }
 
+      // Chain: generate response drafts + checklist + fit score
+      console.log('[BidPilot] Invoking generate-response for:', tenderId);
+      try {
+        const genResult = await callEdgeFunction('generate-response', { tender_id: tenderId });
+        console.log('[BidPilot] generate-response result:', genResult);
+      } catch (genErr: any) {
+        console.warn('[BidPilot] generate-response failed (non-blocking):', genErr.message);
+      }
+
       setFlowState('ready');
       toast({ title: t('tender.created'), description: t('tender.createdDescription') });
     } catch (err: any) {
