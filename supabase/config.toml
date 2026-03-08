@@ -1,1 +1,4 @@
 project_id = "qitfusqfwdbgcrbuuxiu"
+
+[functions.process-tender]
+verify_jwt = false
