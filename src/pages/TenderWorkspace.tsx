@@ -23,6 +23,8 @@ type Risk = Tables<'risks'>;
 type Deadline = Tables<'deadlines'>;
 type ResponseSection = Tables<'response_sections'>;
 type ChecklistItem = Tables<'checklist_items'>;
+type RequirementMatch = Tables<'requirement_matches'>;
+type KnowledgeAsset = Tables<'knowledge_assets'>;
 
 const TABS = ['overview', 'documents', 'requirements', 'risks', 'knowledge', 'draft', 'checklist'] as const;
 type Tab = typeof TABS[number];
