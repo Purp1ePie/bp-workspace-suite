@@ -351,6 +351,21 @@ export default function CompanyMemory() {
                   <span className="line-clamp-2">{asset.parse_error}</span>
                 </div>
               )}
+              {(asset.parse_status === 'pending' || asset.parse_status === 'failed') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-2 w-full text-xs h-7"
+                  disabled={reprocessingIds.has(asset.id)}
+                  onClick={() => handleReprocess(asset.id)}
+                >
+                  {reprocessingIds.has(asset.id) ? (
+                    <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Processing…</>
+                  ) : (
+                    <><RotateCw className="h-3 w-3 mr-1.5" />Reprocess</>
+                  )}
+                </Button>
+              )}
               {asset.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-3">
                   {asset.tags.map(tag => (
