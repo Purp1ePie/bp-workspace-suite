@@ -311,6 +311,74 @@ export type Database = {
           },
         ]
       }
+      requirement_matches: {
+        Row: {
+          confidence_score: number
+          created_at: string
+          id: string
+          knowledge_asset_id: string
+          match_reason: string | null
+          organization_id: string
+          requirement_id: string
+          status: string
+          tender_id: string
+          updated_at: string
+        }
+        Insert: {
+          confidence_score?: number
+          created_at?: string
+          id?: string
+          knowledge_asset_id: string
+          match_reason?: string | null
+          organization_id: string
+          requirement_id: string
+          status?: string
+          tender_id: string
+          updated_at?: string
+        }
+        Update: {
+          confidence_score?: number
+          created_at?: string
+          id?: string
+          knowledge_asset_id?: string
+          match_reason?: string | null
+          organization_id?: string
+          requirement_id?: string
+          status?: string
+          tender_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "requirement_matches_knowledge_asset_id_fkey"
+            columns: ["knowledge_asset_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "requirement_matches_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "requirement_matches_requirement_id_fkey"
+            columns: ["requirement_id"]
+            isOneToOne: false
+            referencedRelation: "requirements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "requirement_matches_tender_org_fk"
+            columns: ["tender_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "tenders"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
       requirements: {
         Row: {
           category: string | null

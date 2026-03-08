@@ -11,6 +11,7 @@ import {
   ArrowLeft, FileText, AlertTriangle, CheckSquare, BookOpen, Edit, List,
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
+  Check, X as XIcon, Sparkles,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
@@ -23,6 +24,8 @@ type Risk = Tables<'risks'>;
 type Deadline = Tables<'deadlines'>;
 type ResponseSection = Tables<'response_sections'>;
 type ChecklistItem = Tables<'checklist_items'>;
+type RequirementMatch = Tables<'requirement_matches'>;
+type KnowledgeAsset = Tables<'knowledge_assets'>;
 
 const TABS = ['overview', 'documents', 'requirements', 'risks', 'knowledge', 'draft', 'checklist'] as const;
 type Tab = typeof TABS[number];
@@ -68,6 +71,8 @@ export default function TenderWorkspace() {
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [sections, setSections] = useState<ResponseSection[]>([]);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [matches, setMatches] = useState<RequirementMatch[]>([]);
+  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -75,7 +80,7 @@ export default function TenderWorkspace() {
 
   const loadData = useCallback(async () => {
     if (!id) return;
-    const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes] = await Promise.all([
+    const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes, mRes] = await Promise.all([
       supabase.from('tenders').select('*').eq('id', id).single(),
       supabase.from('tender_documents').select('*').eq('tender_id', id).order('created_at', { ascending: false }),
       supabase.from('requirements').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
@@ -83,6 +88,7 @@ export default function TenderWorkspace() {
       supabase.from('deadlines').select('*').eq('tender_id', id).order('due_at', { ascending: true }),
       supabase.from('response_sections').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
       supabase.from('checklist_items').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
+      supabase.from('requirement_matches').select('*').eq('tender_id', id).order('confidence_score', { ascending: false }),
     ]);
     setTender(tRes.data);
     setDocs(dRes.data || []);
@@ -91,6 +97,17 @@ export default function TenderWorkspace() {
     setDeadlines(dlRes.data || []);
     setSections(sRes.data || []);
     setChecklist(cRes.data || []);
+    setMatches(mRes.data || []);
+
+    // Fetch knowledge assets if we have matches
+    const matchData = mRes.data || [];
+    if (matchData.length > 0) {
+      const assetIds = [...new Set(matchData.map(m => m.knowledge_asset_id))];
+      const { data: assets } = await supabase.from('knowledge_assets').select('*').in('id', assetIds);
+      setKnowledgeAssets(assets || []);
+    } else {
+      setKnowledgeAssets([]);
+    }
   }, [id]);
 
   useEffect(() => {
@@ -123,6 +140,46 @@ export default function TenderWorkspace() {
     }
   };
 
+  const handleUpdateMatchStatus = async (matchId: string, status: 'accepted' | 'rejected') => {
+    const { error } = await supabase.from('requirement_matches').update({ status }).eq('id', matchId);
+    if (error) {
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
+    } else {
+      setMatches(prev => prev.map(m => m.id === matchId ? { ...m, status } : m));
+    }
+  };
+
+  const [matchingInProgress, setMatchingInProgress] = useState(false);
+  const handleRetryMatching = async () => {
+    if (!id) return;
+    setMatchingInProgress(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active session');
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/match-knowledge-assets`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ tender_id: id }),
+        }
+      );
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || `Matching failed: ${response.status}`);
+      toast({ title: 'Knowledge matching complete', description: `${result.inserted_matches || 0} matches found` });
+      await loadData();
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setMatchingInProgress(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -149,6 +206,7 @@ export default function TenderWorkspace() {
     documents: docs.length,
     requirements: requirements.length,
     risks: risks.length + deadlines.length,
+    knowledge: matches.length,
     draft: sections.length,
     checklist: checklist.length,
   };
@@ -497,36 +555,140 @@ export default function TenderWorkspace() {
 
         {/* KNOWLEDGE MATCHES */}
         {activeTab === 'knowledge' && (
-          requirements.length === 0 ? (
-            <EmptyState icon={BookOpen} title={t('workspace.noKnowledge')} description={t('workspace.knowledgeHint')} />
-          ) : (
-            <div className="space-y-4">
-              <div className="glass-card p-4 border-info/20 bg-info/5 flex items-start gap-3">
-                <Info className="h-4 w-4 text-info shrink-0 mt-0.5" />
-                <p className="text-sm text-muted-foreground">{t('workspace.knowledgeHint')}</p>
+          <div className="space-y-4">
+            {/* Header with retry button */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span>{matches.length} matches across {requirements.length} requirements</span>
               </div>
-              {requirements.slice(0, 8).map((req) => (
-                <div key={req.id} className="glass-card p-5">
-                  <div className="grid lg:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{t('workspace.requirement')}</p>
-                      <p className="text-sm leading-relaxed">{req.text}</p>
-                      {req.mandatory && (
-                        <span className="inline-block mt-2 text-[10px] px-2 py-0.5 rounded-full bg-destructive/15 text-destructive font-semibold uppercase">{t('workspace.mandatory')}</span>
-                      )}
-                    </div>
-                    <div className="border-t lg:border-t-0 lg:border-l border-border pt-4 lg:pt-0 lg:pl-4">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{t('workspace.suggestedAssets')}</p>
-                      <div className="flex flex-col items-center justify-center py-6 text-center">
-                        <BookOpen className="h-5 w-5 text-muted-foreground/50 mb-1" />
-                        <p className="text-xs text-muted-foreground">—</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+              <Button size="sm" variant="outline" onClick={handleRetryMatching} disabled={matchingInProgress}>
+                {matchingInProgress ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                Re-run matching
+              </Button>
             </div>
-          )
+
+            {matches.length === 0 ? (
+              <EmptyState
+                icon={BookOpen}
+                title="No knowledge matches yet"
+                description="No relevant company knowledge was matched to tender requirements. Upload assets in Company Memory or re-run matching."
+                action={
+                  <Button size="sm" variant="outline" onClick={handleRetryMatching} disabled={matchingInProgress}>
+                    {matchingInProgress ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                    Run matching
+                  </Button>
+                }
+              />
+            ) : (
+              (() => {
+                // Group matches by requirement
+                const assetMap = new Map(knowledgeAssets.map(a => [a.id, a]));
+                const grouped = new Map<string, { req: Requirement; matches: RequirementMatch[] }>();
+                for (const req of requirements) {
+                  const reqMatches = matches.filter(m => m.requirement_id === req.id);
+                  if (reqMatches.length > 0) {
+                    grouped.set(req.id, { req, matches: reqMatches });
+                  }
+                }
+                // Requirements with no matches
+                const unmatchedReqs = requirements.filter(r => !grouped.has(r.id));
+
+                return (
+                  <div className="space-y-4">
+                    {Array.from(grouped.values()).map(({ req, matches: reqMatches }) => (
+                      <div key={req.id} className="glass-card overflow-hidden">
+                        {/* Requirement header */}
+                        <div className="px-5 py-3.5 border-b border-border surface-2">
+                          <p className="text-sm leading-relaxed">{req.text}</p>
+                          <div className="flex items-center gap-2 mt-2">
+                            {req.mandatory && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-destructive/15 text-destructive font-semibold uppercase tracking-wider">
+                                Mandatory
+                              </span>
+                            )}
+                            {req.category && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium flex items-center gap-1">
+                                <Tag className="h-2.5 w-2.5" />
+                                {req.category}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {/* Matched assets */}
+                        <div className="divide-y divide-border">
+                          {reqMatches.map(match => {
+                            const asset = assetMap.get(match.knowledge_asset_id);
+                            const statusColors: Record<string, string> = {
+                              suggested: 'bg-primary/10 text-primary',
+                              accepted: 'bg-success/15 text-success',
+                              rejected: 'bg-destructive/15 text-destructive',
+                            };
+                            return (
+                              <div key={match.id} className="px-5 py-3.5 flex items-center gap-4">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-sm font-medium truncate">{asset?.title || 'Unknown asset'}</p>
+                                    {asset?.asset_type && (
+                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium capitalize shrink-0">
+                                        {asset.asset_type.replace('_', ' ')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    <span className="text-xs text-muted-foreground">
+                                      Confidence: <span className="font-semibold text-foreground">{match.confidence_score}%</span>
+                                    </span>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${statusColors[match.status] || 'bg-muted text-muted-foreground'}`}>
+                                      {match.status}
+                                    </span>
+                                  </div>
+                                </div>
+                                {match.status === 'suggested' && (
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 text-success hover:bg-success/10 hover:text-success"
+                                      onClick={() => handleUpdateMatchStatus(match.id, 'accepted')}
+                                    >
+                                      <Check className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                      onClick={() => handleUpdateMatchStatus(match.id, 'rejected')}
+                                    >
+                                      <XIcon className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+
+                    {unmatchedReqs.length > 0 && (
+                      <div className="glass-card p-4 border-muted">
+                        <p className="text-xs text-muted-foreground mb-2">{unmatchedReqs.length} requirements with no matches</p>
+                        <div className="space-y-1.5">
+                          {unmatchedReqs.slice(0, 5).map(r => (
+                            <p key={r.id} className="text-xs text-muted-foreground/70 truncate">• {r.text}</p>
+                          ))}
+                          {unmatchedReqs.length > 5 && (
+                            <p className="text-xs text-muted-foreground/50">+{unmatchedReqs.length - 5} more</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
+            )}
+          </div>
         )}
 
         {/* DRAFT */}
