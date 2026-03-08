@@ -27,7 +27,29 @@ const typeIcons: Record<string, string> = {
   past_answer: '💬',
 };
 
-export default function CompanyMemory() {
+function ParseStatusIndicator({ status }: { status: string }) {
+  if (status === 'parsed') return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-success/15 text-success font-medium">
+      <CheckCircle2 className="h-3 w-3" /> Parsed
+    </span>
+  );
+  if (status === 'processing') return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-warning/15 text-warning font-medium">
+      <Loader2 className="h-3 w-3 animate-spin" /> Processing
+    </span>
+  );
+  if (status === 'failed') return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-destructive/15 text-destructive font-medium">
+      <AlertCircle className="h-3 w-3" /> Failed
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
+      <Clock className="h-3 w-3" /> Pending
+    </span>
+  );
+}
+
   const { t, language } = useI18n();
   const { toast } = useToast();
   const dateFnsLocale = language === 'de' ? de : enUS;
