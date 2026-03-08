@@ -6,12 +6,35 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon, ArrowRight } from 'lucide-react';
+import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon, ArrowRight, AlertCircle, RefreshCw } from 'lucide-react';
 
 const SOURCE_TYPES = ['simap', 'email', 'upload', 'manual', 'portal'] as const;
 const TENDER_TYPES = ['public', 'private'] as const;
 
-type UploadState = 'idle' | 'uploading' | 'success';
+type FlowState = 'idle' | 'uploading' | 'processing' | 'ready' | 'failed';
+
+async function callProcessTender(tenderId: string): Promise<any> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
+  if (!accessToken) throw new Error('No active session. Please sign in again.');
+
+  const response = await fetch(
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-tender`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+      body: JSON.stringify({ tender_id: tenderId }),
+    }
+  );
+
+  const body = await response.json();
+  if (!response.ok) throw new Error(body?.error || `Function failed: ${response.status}`);
+  return body;
+}
 
 export default function NewTender() {
   const { t } = useI18n();
