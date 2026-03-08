@@ -6,12 +6,35 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon, ArrowRight, AlertCircle, Sparkles, RotateCcw } from 'lucide-react';
+import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon, ArrowRight, AlertCircle, RefreshCw } from 'lucide-react';
 
 const SOURCE_TYPES = ['simap', 'email', 'upload', 'manual', 'portal'] as const;
 const TENDER_TYPES = ['public', 'private'] as const;
 
-type FlowState = 'idle' | 'uploading' | 'uploaded' | 'processing' | 'ready' | 'failed';
+type FlowState = 'idle' | 'uploading' | 'processing' | 'ready' | 'failed';
+
+async function callProcessTender(tenderId: string): Promise<any> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
+  if (!accessToken) throw new Error('No active session. Please sign in again.');
+
+  const response = await fetch(
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-tender`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+      body: JSON.stringify({ tender_id: tenderId }),
+    }
+  );
+
+  const body = await response.json();
+  if (!response.ok) throw new Error(body?.error || `Function failed: ${response.status}`);
+  return body;
+}
 
 export default function NewTender() {
   const { t } = useI18n();
@@ -61,17 +84,17 @@ export default function NewTender() {
   const invokeProcessTender = async (tenderId: string) => {
     setFlowState('processing');
     setProcessingError(null);
+    console.log('[BidPilot] Invoking process-tender for:', tenderId);
     try {
-      const { data, error } = await supabase.functions.invoke('process-tender', {
-        body: { tender_id: tenderId },
-      });
-      if (error) throw error;
+      const result = await callProcessTender(tenderId);
+      console.log('[BidPilot] process-tender result:', result);
       setFlowState('ready');
-      toast({ title: t('tender.analysisReady') });
+      toast({ title: t('tender.created'), description: t('tender.createdDescription') });
     } catch (err: any) {
+      console.error('[BidPilot] process-tender error:', err);
+      setProcessingError(err.message);
       setFlowState('failed');
-      setProcessingError(err.message || 'Unknown error');
-      toast({ title: t('tender.processingFailed'), description: err.message, variant: 'destructive' });
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
     }
   };
 
@@ -79,6 +102,7 @@ export default function NewTender() {
     e.preventDefault();
     setFlowState('uploading');
     setUploadedCount(0);
+    setProcessingError(null);
 
     try {
       const { data: orgData } = await supabase.rpc('current_organization_id');
@@ -99,8 +123,9 @@ export default function NewTender() {
         .single();
 
       if (tenderErr) throw tenderErr;
+      console.log('[BidPilot] Tender created:', tender.id);
 
-      // Response sections and checklist items are auto-created by the seed_tender_defaults trigger
+      setCreatedTenderId(tender.id);
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -119,13 +144,12 @@ export default function NewTender() {
         }
         setUploadedCount(i + 1);
       }
+      console.log('[BidPilot] Files uploaded:', files.length);
 
-      setCreatedTenderId(tender.id);
-      setFlowState('uploaded');
-
-      // Automatically invoke process-tender
+      // Invoke the real Edge Function
       await invokeProcessTender(tender.id);
     } catch (err: any) {
+      console.error('[BidPilot] Submit error:', err);
       setFlowState('idle');
       toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
     }
@@ -137,90 +161,52 @@ export default function NewTender() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // Post-upload states
-  if (flowState === 'uploaded' || flowState === 'processing' || flowState === 'ready' || flowState === 'failed') {
+  if (flowState === 'processing') {
     return (
       <div className="flex flex-col items-center justify-center h-96 animate-fade-in">
-        {/* Step indicators */}
-        <div className="flex items-center gap-3 mb-8">
-          <StepIndicator step={1} label={t('tender.uploadComplete')} state="done" />
-          <div className="w-8 h-px bg-border" />
-          <StepIndicator
-            step={2}
-            label={t('tender.processingTender')}
-            state={flowState === 'uploaded' ? 'waiting' : flowState === 'processing' ? 'active' : flowState === 'ready' ? 'done' : 'error'}
-          />
-          <div className="w-8 h-px bg-border" />
-          <StepIndicator
-            step={3}
-            label={t('tender.analysisReady')}
-            state={flowState === 'ready' ? 'done' : 'waiting'}
-          />
+        <Loader2 className="h-10 w-10 text-primary animate-spin mb-4" />
+        <h2 className="text-xl font-bold font-heading">{t('tender.processingTender')}</h2>
+        <p className="text-sm text-muted-foreground mt-1">{t('tender.processingDescription')}</p>
+      </div>
+    );
+  }
+
+  if (flowState === 'failed') {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 animate-fade-in">
+        <div className="rounded-full bg-destructive/20 p-4 mb-4">
+          <AlertCircle className="h-10 w-10 text-destructive" />
         </div>
-
-        {/* Main status */}
-        {flowState === 'processing' && (
-          <div className="text-center">
-            <div className="rounded-full bg-primary/20 p-4 mb-4 mx-auto w-fit">
-              <Loader2 className="h-10 w-10 text-primary animate-spin" />
-            </div>
-            <h2 className="text-xl font-bold font-heading">{t('tender.processingTender')}</h2>
-            <p className="text-sm text-muted-foreground mt-1">{t('workspace.processingHint')}</p>
-          </div>
-        )}
-
-        {flowState === 'ready' && (
-          <div className="text-center">
-            <div className="rounded-full bg-success/20 p-4 mb-4 mx-auto w-fit">
-              <Sparkles className="h-10 w-10 text-success" />
-            </div>
-            <h2 className="text-xl font-bold font-heading">{t('tender.analysisReady')}</h2>
-            <p className="text-sm text-muted-foreground mt-1">{t('tender.createdDescription')}</p>
-          </div>
-        )}
-
-        {flowState === 'failed' && (
-          <div className="text-center">
-            <div className="rounded-full bg-destructive/20 p-4 mb-4 mx-auto w-fit">
-              <AlertCircle className="h-10 w-10 text-destructive" />
-            </div>
-            <h2 className="text-xl font-bold font-heading">{t('tender.processingFailed')}</h2>
-            <p className="text-sm text-muted-foreground mt-1">{processingError}</p>
-            {createdTenderId && (
-              <Button size="sm" variant="outline" className="mt-4" onClick={() => invokeProcessTender(createdTenderId)}>
-                <RotateCcw className="h-4 w-4 mr-1.5" />
-                {t('tender.retryProcessing')}
+        <h2 className="text-xl font-bold font-heading">{t('common.error')}</h2>
+        <p className="text-sm text-muted-foreground mt-1 max-w-md text-center">{processingError}</p>
+        {createdTenderId && (
+          <div className="flex gap-3 mt-4">
+            <Button size="sm" variant="outline" onClick={() => invokeProcessTender(createdTenderId)}>
+              <RefreshCw className="h-4 w-4 mr-1.5" />
+              {t('workspace.retryProcessing')}
+            </Button>
+            <Link to={`/tenders/${createdTenderId}`}>
+              <Button size="sm" variant="secondary">
+                {t('tender.goToWorkspace')}
+                <ArrowRight className="h-4 w-4 ml-1.5" />
               </Button>
-            )}
+            </Link>
           </div>
         )}
+      </div>
+    );
+  }
 
-        {flowState === 'uploaded' && (
-          <div className="text-center">
-            <div className="rounded-full bg-primary/20 p-4 mb-4 mx-auto w-fit">
-              <CheckCircle2 className="h-10 w-10 text-primary" />
-            </div>
-            <h2 className="text-xl font-bold font-heading">{t('tender.uploadComplete')}</h2>
-          </div>
-        )}
+  if (flowState === 'ready') {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 animate-fade-in">
+        <div className="rounded-full bg-success/20 p-4 mb-4">
+          <CheckCircle2 className="h-10 w-10 text-success" />
+        </div>
+        <h2 className="text-xl font-bold font-heading">{t('tender.created')}</h2>
+        <p className="text-sm text-muted-foreground mt-1">{t('tender.createdDescription')}</p>
 
-        {/* File summary */}
-        {files.length > 0 && (
-          <div className="mt-4 glass-card p-4 w-full max-w-sm">
-            <p className="text-xs text-muted-foreground mb-2">
-              {uploadedCount}/{files.length} {t('tender.filesSelected')}
-            </p>
-            {files.map((file, idx) => (
-              <div key={idx} className="flex items-center gap-2 py-1 text-xs">
-                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="truncate flex-1">{file.name}</span>
-                <span className="text-success">✓</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {createdTenderId && (flowState === 'ready' || flowState === 'failed') && (
+        {createdTenderId && (
           <Link to={`/tenders/${createdTenderId}`}>
             <Button size="sm" className="mt-4">
               {t('tender.goToWorkspace')}
@@ -383,26 +369,6 @@ export default function NewTender() {
           )}
         </Button>
       </form>
-    </div>
-  );
-}
-
-function StepIndicator({ step, label, state }: { step: number; label: string; state: 'waiting' | 'active' | 'done' | 'error' }) {
-  return (
-    <div className="flex flex-col items-center gap-1.5">
-      <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-        state === 'done' ? 'bg-success text-success-foreground' :
-        state === 'active' ? 'bg-primary text-primary-foreground animate-pulse' :
-        state === 'error' ? 'bg-destructive text-destructive-foreground' :
-        'bg-muted text-muted-foreground'
-      }`}>
-        {state === 'done' ? '✓' : state === 'error' ? '!' : step}
-      </div>
-      <span className={`text-xs max-w-[100px] text-center ${
-        state === 'done' ? 'text-success' : state === 'active' ? 'text-primary' : state === 'error' ? 'text-destructive' : 'text-muted-foreground'
-      }`}>
-        {label}
-      </span>
     </div>
   );
 }
