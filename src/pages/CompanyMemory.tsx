@@ -5,8 +5,9 @@ import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { BookOpen, Upload, Search, X, FileText, Loader2 } from 'lucide-react';
+import { BookOpen, Upload, Search, X, FileText, Loader2, Database, Tag, FolderOpen } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
 import type { Tables } from '@/integrations/supabase/types';
@@ -75,7 +76,6 @@ export default function CompanyMemory() {
 
       let storagePath: string | null = null;
       if (file) {
-        // Use structured path: org_id/asset_type/uuid_filename
         const path = `${orgId}/${assetType}/${crypto.randomUUID()}_${file.name}`;
         const { error: upErr } = await supabase.storage.from('knowledge-assets').upload(path, file);
         if (upErr) throw upErr;
@@ -105,6 +105,13 @@ export default function CompanyMemory() {
     }
   };
 
+  // Stats
+  const typeCounts = ASSET_TYPES.reduce((acc, at) => {
+    acc[at] = assets.filter(a => a.asset_type === at).length;
+    return acc;
+  }, {} as Record<string, number>);
+  const totalTags = new Set(assets.flatMap(a => a.tags)).size;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -127,21 +134,40 @@ export default function CompanyMemory() {
         </Button>
       </div>
 
-      {/* Stats */}
+      {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <div className="glass-card px-4 py-3">
-          <p className="text-xs text-muted-foreground">{t('memory.totalAssets')}</p>
-          <p className="text-lg font-bold font-heading mt-0.5">{assets.length}</p>
+        <div className="glass-card px-4 py-3.5 flex items-center gap-3">
+          <div className="rounded-lg bg-primary/10 p-2">
+            <Database className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">{t('memory.totalAssets')}</p>
+            <p className="text-lg font-bold font-heading">{assets.length}</p>
+          </div>
         </div>
-        {ASSET_TYPES.slice(0, 3).map(at => {
-          const count = assets.filter(a => a.asset_type === at).length;
-          return (
-            <div key={at} className="glass-card px-4 py-3">
-              <p className="text-xs text-muted-foreground">{t(`memory.types.${at}` as any)}</p>
-              <p className="text-lg font-bold font-heading mt-0.5">{count}</p>
-            </div>
-          );
-        })}
+        <div className="glass-card px-4 py-3.5 flex items-center gap-3">
+          <div className="rounded-lg bg-primary/10 p-2">
+            <FolderOpen className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Categories</p>
+            <p className="text-lg font-bold font-heading">{ASSET_TYPES.filter(at => typeCounts[at] > 0).length}</p>
+          </div>
+        </div>
+        <div className="glass-card px-4 py-3.5 flex items-center gap-3">
+          <div className="rounded-lg bg-primary/10 p-2">
+            <Tag className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Tags</p>
+            <p className="text-lg font-bold font-heading">{totalTags}</p>
+          </div>
+        </div>
+        <div className="glass-card px-4 py-3.5">
+          <p className="text-xs text-muted-foreground mb-1.5">Coverage</p>
+          <Progress value={ASSET_TYPES.length > 0 ? (ASSET_TYPES.filter(at => typeCounts[at] > 0).length / ASSET_TYPES.length) * 100 : 0} className="h-1.5" />
+          <p className="text-[10px] text-muted-foreground mt-1">{ASSET_TYPES.filter(at => typeCounts[at] > 0).length}/{ASSET_TYPES.length} types</p>
+        </div>
       </div>
 
       {/* Upload panel */}
@@ -221,7 +247,7 @@ export default function CompanyMemory() {
         >
           <option value="">{t('memory.allTypes')}</option>
           {ASSET_TYPES.map(at => (
-            <option key={at} value={at}>{t(`memory.types.${at}` as any)}</option>
+            <option key={at} value={at}>{t(`memory.types.${at}` as any)} ({typeCounts[at]})</option>
           ))}
         </select>
       </div>
@@ -236,12 +262,12 @@ export default function CompanyMemory() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map(asset => (
-            <div key={asset.id} className="glass-card p-5 hover:border-primary/30 transition-colors">
+            <div key={asset.id} className="glass-card p-5 hover:border-primary/20 transition-colors group">
               <div className="flex items-start gap-3">
                 <span className="text-xl">{typeIcons[asset.asset_type] || '📎'}</span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium leading-tight">{asset.title}</p>
-                  <span className="inline-block mt-1.5 text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                  <p className="text-sm font-medium leading-tight group-hover:text-primary transition-colors">{asset.title}</p>
+                  <span className="inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold uppercase tracking-wider">
                     {t(`memory.types.${asset.asset_type}` as any)}
                   </span>
                 </div>
@@ -249,7 +275,7 @@ export default function CompanyMemory() {
               {asset.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-3">
                   {asset.tags.map(tag => (
-                    <span key={tag} className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                    <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
                       {tag}
                     </span>
                   ))}
