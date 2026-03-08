@@ -11,7 +11,7 @@ import {
   ArrowLeft, FileText, AlertTriangle, CheckSquare, BookOpen, Edit, List,
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
-  Check, X as XIcon, Sparkles,
+  Check, X as XIcon, Sparkles, FileSpreadsheet, Download,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
@@ -210,6 +210,56 @@ export default function TenderWorkspace() {
     }
   };
 
+  const [exportingExcel, setExportingExcel] = useState(false);
+
+  const handleExportFilledExcel = async () => {
+    if (!id) return;
+    const excelDoc = docs.find(d => {
+      const ext = (d.file_name || '').toLowerCase().split('.').pop();
+      return ext === 'xlsx';
+    });
+    if (!excelDoc) {
+      toast({ title: t('common.error'), description: 'No Excel (.xlsx) document found in this tender.', variant: 'destructive' });
+      return;
+    }
+    setExportingExcel(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active session');
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/export-filled-excel`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ tender_id: id, document_id: excelDoc.id }),
+        }
+      );
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error || `Export failed: ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `FILLED_${excelDoc.file_name}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: 'Excel exported', description: `Downloaded FILLED_${excelDoc.file_name}` });
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
   const handleRetryMatching = async () => {
     if (!id) return;
     setMatchingInProgress(true);
@@ -288,6 +338,7 @@ export default function TenderWorkspace() {
   const unmatchedReqs = requirements.filter(r => !matchedReqIds.has(r.id));
   const gapSection = sections.find(s => s.section_title === 'Coverage Gaps');
   const fitScoreColor = (tender.fit_score ?? 0) >= 70 ? 'text-success' : (tender.fit_score ?? 0) >= 40 ? 'text-warning' : 'text-destructive';
+  const hasExcelDoc = docs.some(d => (d.file_name || '').toLowerCase().endsWith('.xlsx'));
 
   return (
     <div className="animate-fade-in">
@@ -874,10 +925,18 @@ export default function TenderWorkspace() {
                   </div>
                   <Progress value={sections.length > 0 ? (draftedSections / sections.length) * 100 : 0} className="h-1.5" />
                 </div>
-                <Button size="sm" variant="outline" onClick={handleGenerateResponse} disabled={generatingResponse}>
-                  {generatingResponse ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
-                  {sections.length > 0 ? 'Re-generate' : 'Generate AI Draft'}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={handleGenerateResponse} disabled={generatingResponse}>
+                    {generatingResponse ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                    {sections.length > 0 ? 'Re-generate' : 'Generate AI Draft'}
+                  </Button>
+                  {hasExcelDoc && draftedSections > 0 && (
+                    <Button size="sm" variant="outline" onClick={handleExportFilledExcel} disabled={exportingExcel}>
+                      {exportingExcel ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />}
+                      Download Filled Excel
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {sections.map(s => (

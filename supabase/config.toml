@@ -11,3 +11,20 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/match-knowledge-assets/deno.json"
 entrypoint = "./functions/match-knowledge-assets/index.ts"
+
+[functions.process-knowledge-assets]
+enabled = true
+verify_jwt = false
+import_map = "./functions/process-knowledge-assets/deno.json"
+entrypoint = "./functions/process-knowledge-assets/index.ts"
+
+[functions.generate-response]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/generate-response/index.ts"
+
+[functions.export-filled-excel]
+enabled = true
+verify_jwt = false
+import_map = "./functions/export-filled-excel/deno.json"
+entrypoint = "./functions/export-filled-excel/index.ts"
