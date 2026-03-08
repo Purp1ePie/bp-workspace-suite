@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon } from 'lucide-react';
+import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon, ArrowRight } from 'lucide-react';
 
 const SOURCE_TYPES = ['simap', 'email', 'upload', 'manual', 'portal'] as const;
 const TENDER_TYPES = ['public', 'private'] as const;
@@ -29,6 +29,8 @@ export default function NewTender() {
   const [files, setFiles] = useState<File[]>([]);
   const [uploadState, setUploadState] = useState<UploadState>('idle');
   const [dragOver, setDragOver] = useState(false);
+  const [createdTenderId, setCreatedTenderId] = useState<string | null>(null);
+  const [uploadedCount, setUploadedCount] = useState(0);
 
   const handleFiles = (newFiles: FileList | File[]) => {
     setFiles(prev => [...prev, ...Array.from(newFiles)]);
@@ -58,6 +60,7 @@ export default function NewTender() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setUploadState('uploading');
+    setUploadedCount(0);
 
     try {
       const { data: orgData } = await supabase.rpc('current_organization_id');
@@ -79,7 +82,10 @@ export default function NewTender() {
 
       if (tenderErr) throw tenderErr;
 
-      for (const file of files) {
+      // Response sections and checklist items are auto-created by the seed_tender_defaults trigger
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         const path = `${orgData}/${tender.id}/${crypto.randomUUID()}_${file.name}`;
         const { error: uploadErr } = await supabase.storage.from('tender-files').upload(path, file);
 
@@ -90,14 +96,15 @@ export default function NewTender() {
             file_name: file.name,
             file_type: file.type || null,
             storage_path: path,
+            parse_status: 'pending',
           });
         }
+        setUploadedCount(i + 1);
       }
 
+      setCreatedTenderId(tender.id);
       setUploadState('success');
-      toast({ title: t('common.success'), description: t('tender.create') });
-
-      setTimeout(() => navigate(`/tenders/${tender.id}`), 800);
+      toast({ title: t('tender.created'), description: t('tender.createdDescription') });
     } catch (err: any) {
       setUploadState('idle');
       toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
@@ -116,8 +123,34 @@ export default function NewTender() {
         <div className="rounded-full bg-success/20 p-4 mb-4">
           <CheckCircle2 className="h-10 w-10 text-success" />
         </div>
-        <h2 className="text-xl font-bold font-heading">{t('common.success')}</h2>
-        <p className="text-sm text-muted-foreground mt-1">{t('tender.create')}</p>
+        <h2 className="text-xl font-bold font-heading">{t('tender.created')}</h2>
+        <p className="text-sm text-muted-foreground mt-1">{t('tender.createdDescription')}</p>
+
+        {files.length > 0 && (
+          <div className="mt-4 glass-card p-4 w-full max-w-sm">
+            <p className="text-xs text-muted-foreground mb-2">
+              {uploadedCount}/{files.length} {t('tender.filesSelected')}
+            </p>
+            {files.map((file, idx) => (
+              <div key={idx} className="flex items-center gap-2 py-1 text-xs">
+                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="truncate flex-1">{file.name}</span>
+                <span className="text-warning">
+                  {t('workspace.parseStatus.pending')}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {createdTenderId && (
+          <Link to={`/tenders/${createdTenderId}`}>
+            <Button size="sm" className="mt-4">
+              {t('tender.goToWorkspace')}
+              <ArrowRight className="h-4 w-4 ml-1.5" />
+            </Button>
+          </Link>
+        )}
       </div>
     );
   }
@@ -126,16 +159,14 @@ export default function NewTender() {
     <div className="p-6 lg:p-8 max-w-3xl mx-auto animate-fade-in">
       <div className="mb-8">
         <h1 className="text-2xl font-bold font-heading">{t('tender.new')}</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t('tender.details')}
-        </p>
+        <p className="text-sm text-muted-foreground mt-1">{t('tender.details')}</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
         {/* Basic details */}
         <div className="glass-card p-6 space-y-5">
           <h2 className="text-sm font-semibold font-heading text-muted-foreground uppercase tracking-wider">{t('tender.details')}</h2>
-          
+
           <div className="space-y-2">
             <Label>{t('tender.title')}</Label>
             <Input value={title} onChange={e => setTitle(e.target.value)} required placeholder="z.B. IT-Infrastruktur Stadt Zürich" />
@@ -170,7 +201,7 @@ export default function NewTender() {
         {/* Source & Type */}
         <div className="glass-card p-6 space-y-5">
           <h2 className="text-sm font-semibold font-heading text-muted-foreground uppercase tracking-wider">{t('tender.sourceAndType')}</h2>
-          
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>{t('tender.type')}</Label>
@@ -224,7 +255,7 @@ export default function NewTender() {
         {/* File upload */}
         <div className="glass-card p-6 space-y-5">
           <h2 className="text-sm font-semibold font-heading text-muted-foreground uppercase tracking-wider">{t('tender.uploadFiles')}</h2>
-          
+
           <div
             onClick={() => fileInputRef.current?.click()}
             onDrop={handleDrop}
@@ -263,9 +294,13 @@ export default function NewTender() {
           )}
         </div>
 
-        <Button type="submit" className="w-full h-11" disabled={uploadState === 'uploading'}>
+        <Button type="submit" className="w-full h-11" disabled={uploadState === 'uploading' || !title}>
           {uploadState === 'uploading' ? (
-            <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t('tender.creating')}</>
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              {t('tender.creating')}
+              {files.length > 0 && ` (${uploadedCount}/${files.length})`}
+            </>
           ) : (
             t('tender.create')
           )}

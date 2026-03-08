@@ -5,10 +5,11 @@ import { useI18n } from '@/lib/i18n';
 import { StatusBadge } from '@/components/StatusBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import {
   ArrowLeft, FileText, AlertTriangle, CheckSquare, BookOpen, Edit, List,
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
-  ChevronRight, User, Loader2,
+  Loader2, Info,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
@@ -35,9 +36,29 @@ const tabIcons: Record<Tab, any> = {
   checklist: CheckSquare,
 };
 
+const parseStatusColors: Record<string, string> = {
+  pending: 'text-muted-foreground bg-muted',
+  processing: 'text-warning bg-warning/15',
+  parsed: 'text-success bg-success/15',
+  failed: 'text-destructive bg-destructive/15',
+};
+
+const reviewStatusColors: Record<string, string> = {
+  draft: 'bg-muted text-muted-foreground',
+  in_review: 'bg-warning/15 text-warning',
+  approved: 'bg-success/15 text-success',
+};
+
+const severityColors: Record<string, string> = {
+  high: 'text-destructive bg-destructive/15',
+  medium: 'text-warning bg-warning/15',
+  low: 'text-info bg-info/15',
+};
+
 export default function TenderWorkspace() {
   const { id } = useParams<{ id: string }>();
   const { t, language } = useI18n();
+  const { toast } = useToast();
   const dateFnsLocale = language === 'de' ? de : enUS;
   const [tender, setTender] = useState<Tender | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -48,6 +69,7 @@ export default function TenderWorkspace() {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [savingSection, setSavingSection] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -72,6 +94,26 @@ export default function TenderWorkspace() {
     };
     load();
   }, [id]);
+
+  const handleSaveDraft = async (sectionId: string, text: string) => {
+    setSavingSection(sectionId);
+    const { error } = await supabase.from('response_sections').update({ draft_text: text }).eq('id', sectionId);
+    if (error) {
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: t('workspace.draftSaved') });
+      setSections(prev => prev.map(s => s.id === sectionId ? { ...s, draft_text: text } : s));
+    }
+    setSavingSection(null);
+  };
+
+  const handleToggleChecklist = async (item: ChecklistItem) => {
+    const newStatus = item.status === 'done' ? 'open' : 'done';
+    const { error } = await supabase.from('checklist_items').update({ status: newStatus }).eq('id', item.id);
+    if (!error) {
+      setChecklist(prev => prev.map(c => c.id === item.id ? { ...c, status: newStatus } : c));
+    }
+  };
 
   if (loading) {
     return (
@@ -98,19 +140,8 @@ export default function TenderWorkspace() {
   const bidIcon = tender.bid_decision === 'bid' ? ThumbsUp : tender.bid_decision === 'no_bid' ? ThumbsDown : Minus;
   const completedChecklist = checklist.filter(c => c.status === 'done').length;
   const mandatoryReqs = requirements.filter(r => r.mandatory).length;
-
-  const parseStatusColors: Record<string, string> = {
-    pending: 'text-muted-foreground bg-muted',
-    processing: 'text-warning bg-warning/15',
-    completed: 'text-success bg-success/15',
-    failed: 'text-destructive bg-destructive/15',
-  };
-
-  const severityColors: Record<string, string> = {
-    high: 'text-destructive bg-destructive/15',
-    medium: 'text-warning bg-warning/15',
-    low: 'text-info bg-info/15',
-  };
+  const pendingDocs = docs.filter(d => d.parse_status === 'pending' || d.parse_status === 'processing').length;
+  const allDocsParsed = docs.length > 0 && pendingDocs === 0;
 
   return (
     <div className="animate-fade-in">
@@ -148,7 +179,7 @@ export default function TenderWorkspace() {
                 tender.bid_decision === 'bid' ? 'bg-success/15 text-success' : 'bg-destructive/15 text-destructive'
               }`}>
                 {React.createElement(bidIcon, { className: 'h-3 w-3' })}
-                {t('workspace.bidDecision')}: {tender.bid_decision}
+                {tender.bid_decision}
               </span>
             )}
           </div>
@@ -183,12 +214,31 @@ export default function TenderWorkspace() {
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
+            {/* Processing status banner */}
+            {pendingDocs > 0 && (
+              <div className="glass-card p-4 border-warning/30 bg-warning/5 flex items-start gap-3">
+                <Loader2 className="h-5 w-5 text-warning animate-spin shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium">{t('workspace.processingStatus')}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t('workspace.processingHint')}</p>
+                  <p className="text-xs text-warning mt-1">{pendingDocs} / {docs.length} {t('workspace.parseStatus.pending').toLowerCase()}</p>
+                </div>
+              </div>
+            )}
+
+            {allDocsParsed && (
+              <div className="glass-card p-4 border-success/30 bg-success/5 flex items-center gap-3">
+                <Info className="h-5 w-5 text-success shrink-0" />
+                <p className="text-sm font-medium text-success">{t('workspace.allParsed')}</p>
+              </div>
+            )}
+
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <StatCard label={t('workspace.documents')} value={docs.length} icon={FileText} />
               <StatCard label={t('workspace.requirements')} value={`${mandatoryReqs} ${t('workspace.mandatory')} / ${requirements.length}`} icon={List} />
-              <StatCard label={t('workspace.risks')} value={risks.length} icon={AlertTriangle} />
+              <StatCard label={t('workspace.risks.title')} value={risks.length} icon={AlertTriangle} />
               <StatCard label={t('workspace.checklist')} value={`${completedChecklist}/${checklist.length}`} icon={CheckSquare} />
-              <StatCard label={t('workspace.draft')} value={`${sections.length} sections`} icon={Edit} />
+              <StatCard label={t('workspace.draft')} value={`${sections.filter(s => s.draft_text).length}/${sections.length}`} icon={Edit} />
               <StatCard label={t('workspace.deadlines.title')} value={deadlines.length} icon={Calendar} />
             </div>
           </div>
@@ -222,7 +272,8 @@ export default function TenderWorkspace() {
                         <span className="text-xs text-muted-foreground">{d.file_type || '—'}</span>
                       </td>
                       <td className="px-5 py-3">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${parseStatusColors[d.parse_status] || 'text-muted-foreground bg-muted'}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1 ${parseStatusColors[d.parse_status] || 'text-muted-foreground bg-muted'}`}>
+                          {d.parse_status === 'processing' && <Loader2 className="h-3 w-3 animate-spin" />}
                           {t(`workspace.parseStatus.${d.parse_status}` as any) || d.parse_status}
                         </span>
                       </td>
@@ -240,7 +291,7 @@ export default function TenderWorkspace() {
         {/* REQUIREMENTS */}
         {activeTab === 'requirements' && (
           requirements.length === 0 ? (
-            <EmptyState icon={List} title={t('workspace.noRequirements')} />
+            <EmptyState icon={List} title={t('workspace.noRequirements')} description={pendingDocs > 0 ? t('workspace.processingHint') : undefined} />
           ) : (
             <div className="space-y-3">
               {requirements.map((r, idx) => (
@@ -276,7 +327,7 @@ export default function TenderWorkspace() {
                 {t('workspace.risks.title')}
               </h3>
               {risks.length === 0 ? (
-                <EmptyState icon={AlertTriangle} title={t('workspace.noRisks')} />
+                <EmptyState icon={AlertTriangle} title={t('workspace.noRisks')} description={pendingDocs > 0 ? t('workspace.processingHint') : undefined} />
               ) : (
                 <div className="space-y-3">
                   {risks.map(r => (
@@ -329,7 +380,7 @@ export default function TenderWorkspace() {
           ) : (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">{t('workspace.knowledgeHint')}</p>
-              {requirements.slice(0, 8).map((req, idx) => (
+              {requirements.slice(0, 8).map((req) => (
                 <div key={req.id} className="glass-card p-5">
                   <div className="grid lg:grid-cols-2 gap-4">
                     <div>
@@ -360,25 +411,14 @@ export default function TenderWorkspace() {
           ) : (
             <div className="space-y-4">
               {sections.map(s => (
-                <div key={s.id} className="glass-card overflow-hidden">
-                  <div className="px-5 py-3 border-b border-border flex items-center justify-between bg-muted/30">
-                    <h3 className="text-sm font-semibold font-heading">{s.section_title}</h3>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      s.review_status === 'approved' ? 'bg-success/15 text-success' :
-                      s.review_status === 'review' ? 'bg-warning/15 text-warning' :
-                      'bg-muted text-muted-foreground'
-                    }`}>
-                      {s.review_status}
-                    </span>
-                  </div>
-                  <div className="px-5 py-4">
-                    {s.draft_text ? (
-                      <p className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">{s.draft_text}</p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground italic">—</p>
-                    )}
-                  </div>
-                </div>
+                <DraftSection
+                  key={s.id}
+                  section={s}
+                  saving={savingSection === s.id}
+                  onSave={handleSaveDraft}
+                  reviewStatusColors={reviewStatusColors}
+                  t={t}
+                />
               ))}
             </div>
           )
@@ -421,9 +461,12 @@ export default function TenderWorkspace() {
                     {checklist.map(c => (
                       <tr key={c.id} className="hover:bg-accent/30 transition-colors">
                         <td className="px-5 py-3">
-                          <div className={`h-4 w-4 rounded border-2 ${
-                            c.status === 'done' ? 'bg-success border-success' : 'border-border'
-                          }`} />
+                          <button
+                            onClick={() => handleToggleChecklist(c)}
+                            className={`h-4 w-4 rounded border-2 transition-colors ${
+                              c.status === 'done' ? 'bg-success border-success' : 'border-border hover:border-primary'
+                            }`}
+                          />
                         </td>
                         <td className="px-5 py-3">
                           <span className={`text-sm ${c.status === 'done' ? 'line-through text-muted-foreground' : ''}`}>
@@ -460,6 +503,70 @@ function StatCard({ label, value, icon: Icon }: { label: string; value: string |
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="text-lg font-bold font-heading mt-0.5">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function DraftSection({
+  section,
+  saving,
+  onSave,
+  reviewStatusColors,
+  t,
+}: {
+  section: ResponseSection;
+  saving: boolean;
+  onSave: (id: string, text: string) => void;
+  reviewStatusColors: Record<string, string>;
+  t: (key: any) => string;
+}) {
+  const [text, setText] = useState(section.draft_text || '');
+  const [editing, setEditing] = useState(false);
+
+  return (
+    <div className="glass-card overflow-hidden">
+      <div className="px-5 py-3 border-b border-border flex items-center justify-between bg-muted/30">
+        <h3 className="text-sm font-semibold font-heading">{section.section_title}</h3>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+            reviewStatusColors[section.review_status] || 'bg-muted text-muted-foreground'
+          }`}>
+            {t(`status.${section.review_status}` as any) || section.review_status}
+          </span>
+        </div>
+      </div>
+      <div className="px-5 py-4">
+        {editing ? (
+          <div className="space-y-3">
+            <textarea
+              value={text}
+              onChange={e => setText(e.target.value)}
+              className="w-full min-h-[120px] bg-background border border-border rounded-lg p-3 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder="..."
+            />
+            <div className="flex items-center gap-2 justify-end">
+              <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setText(section.draft_text || ''); }}>
+                {t('common.cancel')}
+              </Button>
+              <Button size="sm" onClick={() => { onSave(section.id, text); setEditing(false); }} disabled={saving}>
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+                {t('common.save')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div
+            onClick={() => setEditing(true)}
+            className="cursor-pointer hover:bg-accent/20 rounded-lg p-2 -m-2 transition-colors min-h-[60px]"
+          >
+            {section.draft_text ? (
+              <p className="text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed">{section.draft_text}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">{t('common.edit')}...</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

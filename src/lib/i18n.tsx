@@ -29,6 +29,18 @@ const translations = {
   'auth.roleName': { de: 'Rolle im Unternehmen', en: 'Role in Company' },
   'auth.language': { de: 'Sprache', en: 'Language' },
 
+  // Onboarding
+  'onboarding.title': { de: 'Organisation erstellen', en: 'Create Organization' },
+  'onboarding.subtitle': { de: 'Erstellen Sie Ihre Organisation, um BidPilot zu nutzen.', en: 'Create your organization to start using BidPilot.' },
+  'onboarding.name': { de: 'Organisationsname', en: 'Organization Name' },
+  'onboarding.namePlaceholder': { de: 'z.B. Muster AG', en: 'e.g. Acme Corp' },
+  'onboarding.industry': { de: 'Branche', en: 'Industry' },
+  'onboarding.industryPlaceholder': { de: 'z.B. IT, Bau, Beratung', en: 'e.g. IT, Construction, Consulting' },
+  'onboarding.size': { de: 'Unternehmensgrösse', en: 'Company Size' },
+  'onboarding.language': { de: 'Standardsprache', en: 'Default Language' },
+  'onboarding.create': { de: 'Organisation erstellen', en: 'Create Organization' },
+  'onboarding.creating': { de: 'Wird erstellt...', en: 'Creating...' },
+
   // Dashboard
   'dashboard.title': { de: 'Dashboard', en: 'Dashboard' },
   'dashboard.welcome': { de: 'Willkommen zurück', en: 'Welcome back' },
@@ -76,6 +88,9 @@ const translations = {
   'tender.sourceAndType': { de: 'Quelle & Typ', en: 'Source & Type' },
   'tender.noTenders': { de: 'Keine Ausschreibungen', en: 'No tenders' },
   'tender.allTenders': { de: 'Alle Ausschreibungen', en: 'All Tenders' },
+  'tender.created': { de: 'Ausschreibung erstellt', en: 'Tender created' },
+  'tender.createdDescription': { de: 'Dokumente werden verarbeitet...', en: 'Documents are being processed...' },
+  'tender.goToWorkspace': { de: 'Zum Workspace', en: 'Go to Workspace' },
 
   // Workspace tabs
   'workspace.overview': { de: 'Übersicht', en: 'Overview' },
@@ -115,9 +130,16 @@ const translations = {
   'workspace.completedItems': { de: 'Erledigte Punkte', en: 'Completed Items' },
   'workspace.owner': { de: 'Verantwortlich', en: 'Owner' },
   'workspace.dueDate': { de: 'Fällig', en: 'Due' },
+  'workspace.processingStatus': { de: 'Verarbeitungsstatus', en: 'Processing Status' },
+  'workspace.processingHint': { de: 'Dokumente werden analysiert. Anforderungen, Risiken und Fristen werden nach der Verarbeitung angezeigt.', en: 'Documents are being analyzed. Requirements, risks, and deadlines will appear after processing.' },
+  'workspace.allParsed': { de: 'Alle Dokumente verarbeitet', en: 'All documents processed' },
+  'workspace.savingDraft': { de: 'Entwurf wird gespeichert...', en: 'Saving draft...' },
+  'workspace.draftSaved': { de: 'Entwurf gespeichert', en: 'Draft saved' },
+
+  // Parse status
   'workspace.parseStatus.pending': { de: 'Ausstehend', en: 'Pending' },
   'workspace.parseStatus.processing': { de: 'Wird verarbeitet', en: 'Processing' },
-  'workspace.parseStatus.completed': { de: 'Abgeschlossen', en: 'Completed' },
+  'workspace.parseStatus.parsed': { de: 'Verarbeitet', en: 'Parsed' },
   'workspace.parseStatus.failed': { de: 'Fehlgeschlagen', en: 'Failed' },
 
   // Memory
@@ -176,7 +198,15 @@ const translations = {
   'status.done': { de: 'Erledigt', en: 'Done' },
   'status.draft': { de: 'Entwurf', en: 'Draft' },
   'status.review': { de: 'Review', en: 'Review' },
+  'status.in_review': { de: 'In Prüfung', en: 'In Review' },
   'status.approved': { de: 'Genehmigt', en: 'Approved' },
+  'status.analyzing': { de: 'Wird analysiert', en: 'Analyzing' },
+  'status.ready_for_review': { de: 'Bereit zur Prüfung', en: 'Ready for Review' },
+  'status.blocked': { de: 'Blockiert', en: 'Blocked' },
+  'status.parsed': { de: 'Verarbeitet', en: 'Parsed' },
+  'status.processing': { de: 'Wird verarbeitet', en: 'Processing' },
+  'status.failed': { de: 'Fehlgeschlagen', en: 'Failed' },
+  'status.pending': { de: 'Ausstehend', en: 'Pending' },
 } as const;
 
 type TranslationKey = keyof typeof translations;
