@@ -80,7 +80,7 @@ export default function TenderWorkspace() {
 
   const loadData = useCallback(async () => {
     if (!id) return;
-    const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes] = await Promise.all([
+    const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes, mRes] = await Promise.all([
       supabase.from('tenders').select('*').eq('id', id).single(),
       supabase.from('tender_documents').select('*').eq('tender_id', id).order('created_at', { ascending: false }),
       supabase.from('requirements').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
@@ -88,6 +88,7 @@ export default function TenderWorkspace() {
       supabase.from('deadlines').select('*').eq('tender_id', id).order('due_at', { ascending: true }),
       supabase.from('response_sections').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
       supabase.from('checklist_items').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
+      supabase.from('requirement_matches').select('*').eq('tender_id', id).order('confidence_score', { ascending: false }),
     ]);
     setTender(tRes.data);
     setDocs(dRes.data || []);
@@ -96,6 +97,17 @@ export default function TenderWorkspace() {
     setDeadlines(dlRes.data || []);
     setSections(sRes.data || []);
     setChecklist(cRes.data || []);
+    setMatches(mRes.data || []);
+
+    // Fetch knowledge assets if we have matches
+    const matchData = mRes.data || [];
+    if (matchData.length > 0) {
+      const assetIds = [...new Set(matchData.map(m => m.knowledge_asset_id))];
+      const { data: assets } = await supabase.from('knowledge_assets').select('*').in('id', assetIds);
+      setKnowledgeAssets(assets || []);
+    } else {
+      setKnowledgeAssets([]);
+    }
   }, [id]);
 
   useEffect(() => {
