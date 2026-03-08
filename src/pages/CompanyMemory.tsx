@@ -68,6 +68,7 @@ export default function CompanyMemory() {
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [reprocessingIds, setReprocessingIds] = useState<Set<string>>(new Set());
 
   const loadAssets = async () => {
     const { data } = await supabase.from('knowledge_assets').select('*').order('created_at', { ascending: false });
