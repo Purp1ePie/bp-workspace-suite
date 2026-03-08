@@ -279,9 +279,15 @@ export default function TenderWorkspace() {
   const failedDocs = docs.filter(d => d.parse_status === 'failed').length;
   const allDocsParsed = docs.length > 0 && pendingDocs === 0;
   const isProcessing = tender.status === 'new' || tender.status === 'analyzing' || pendingDocs > 0;
-  const highRisks = risks.filter(r => r.severity === 'high').length;
+  const highRisks = risks.filter(r => r.severity === 'high' || r.severity === 'critical').length;
   const draftedSections = sections.filter(s => s.draft_text).length;
   const checklistProgress = checklist.length > 0 ? Math.round((completedChecklist / checklist.length) * 100) : 0;
+
+  // Gap & readiness computations
+  const matchedReqIds = new Set(matches.map(m => m.requirement_id));
+  const unmatchedReqs = requirements.filter(r => !matchedReqIds.has(r.id));
+  const gapSection = sections.find(s => s.section_title === 'Coverage Gaps');
+  const fitScoreColor = (tender.fit_score ?? 0) >= 70 ? 'text-success' : (tender.fit_score ?? 0) >= 40 ? 'text-warning' : 'text-destructive';
 
   return (
     <div className="animate-fade-in">
@@ -439,6 +445,92 @@ export default function TenderWorkspace() {
                 progress={checklistProgress}
               />
             </div>
+
+            {/* Fit Score & Readiness */}
+            {tender.fit_score != null && (
+              <div className="glass-card p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Gauge className="h-4 w-4 text-primary" />
+                  <h3 className="font-heading font-semibold text-sm">Fit Score & Readiness</h3>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="text-center p-4 rounded-lg bg-muted/50">
+                    <p className={`text-3xl font-bold font-heading ${fitScoreColor}`}>{tender.fit_score}%</p>
+                    <p className="text-xs text-muted-foreground mt-1">Knowledge Fit</p>
+                  </div>
+                  <div className="text-center p-4 rounded-lg bg-muted/50">
+                    <p className="text-3xl font-bold font-heading text-foreground">
+                      {requirements.length > 0 ? Math.round((matchedReqIds.size / requirements.length) * 100) : 0}%
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">Requirements Covered</p>
+                  </div>
+                  <div className="text-center p-4 rounded-lg bg-muted/50">
+                    <p className="text-3xl font-bold font-heading text-foreground">{checklistProgress}%</p>
+                    <p className="text-xs text-muted-foreground mt-1">Checklist Complete</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Coverage Gaps */}
+            {unmatchedReqs.length > 0 && requirements.length > 0 && (
+              <div className="glass-card p-5 border-warning/30">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-warning" />
+                    <h3 className="font-heading font-semibold text-sm">Coverage Gaps</h3>
+                    <span className="text-xs text-muted-foreground">({unmatchedReqs.length} of {requirements.length} requirements)</span>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={() => setActiveTab('knowledge')} className="text-xs">
+                    View Knowledge Matches
+                    <ArrowLeft className="h-3 w-3 ml-1 rotate-180" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">
+                  These requirements have no matching knowledge assets. Upload relevant documents to Company Memory to improve coverage.
+                </p>
+                <div className="space-y-1.5">
+                  {unmatchedReqs.slice(0, 5).map(r => (
+                    <div key={r.id} className="flex items-start gap-2 text-sm">
+                      <span className={`shrink-0 text-[10px] mt-0.5 px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider ${
+                        r.mandatory ? 'bg-destructive/15 text-destructive' : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {r.mandatory ? 'M' : 'O'}
+                      </span>
+                      <span className="text-muted-foreground leading-snug">{r.text}</span>
+                    </div>
+                  ))}
+                  {unmatchedReqs.length > 5 && (
+                    <p className="text-xs text-muted-foreground/60 pl-6">+{unmatchedReqs.length - 5} more gaps</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* High Risks Summary */}
+            {highRisks > 0 && (
+              <div className="glass-card p-5 border-destructive/30">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-destructive" />
+                    <h3 className="font-heading font-semibold text-sm">Attention Required</h3>
+                    <span className="text-xs text-destructive font-medium">{highRisks} high/critical risks</span>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={() => setActiveTab('risks')} className="text-xs">
+                    View Risks
+                    <ArrowLeft className="h-3 w-3 ml-1 rotate-180" />
+                  </Button>
+                </div>
+                <div className="space-y-1.5">
+                  {risks.filter(r => r.severity === 'high' || r.severity === 'critical').slice(0, 3).map(r => (
+                    <div key={r.id} className="flex items-start gap-2 text-sm">
+                      <span className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${r.severity === 'critical' ? 'bg-destructive' : 'bg-destructive/70'}`} />
+                      <span className="text-muted-foreground leading-snug">{r.description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
