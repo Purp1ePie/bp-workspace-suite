@@ -414,12 +414,18 @@ export default function TenderWorkspace() {
           ) : (
             <div className="space-y-4">
               {/* Document stats bar */}
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span>{docs.length} {t('workspace.documents').toLowerCase()}</span>
-                <span className="w-px h-3 bg-border" />
-                <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-success" />{parsedDocs} parsed</span>
-                {pendingDocs > 0 && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-warning animate-spin" />{pendingDocs} processing</span>}
-                {failedDocs > 0 && <span className="flex items-center gap-1"><XCircle className="h-3 w-3 text-destructive" />{failedDocs} failed</span>}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <span>{docs.length} {t('workspace.documents').toLowerCase()}</span>
+                  <span className="w-px h-3 bg-border" />
+                  <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-success" />{parsedDocs} parsed</span>
+                  {pendingDocs > 0 && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-warning animate-spin" />{pendingDocs} processing</span>}
+                  {failedDocs > 0 && <span className="flex items-center gap-1"><XCircle className="h-3 w-3 text-destructive" />{failedDocs} failed</span>}
+                </div>
+                <Button size="sm" variant="outline" onClick={handleReprocessDocuments} disabled={reprocessing}>
+                  {reprocessing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                  Reprocess Documents
+                </Button>
               </div>
 
               <div className="space-y-2">
