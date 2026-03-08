@@ -89,8 +89,19 @@ export default function NewTender() {
     setProcessingError(null);
     console.log('[BidPilot] Invoking process-tender for:', tenderId);
     try {
-      const result = await callProcessTender(tenderId);
+      const result = await callEdgeFunction('process-tender', { tender_id: tenderId });
       console.log('[BidPilot] process-tender result:', result);
+
+      // Chain: call match-knowledge-assets
+      console.log('[BidPilot] Invoking match-knowledge-assets for:', tenderId);
+      try {
+        const matchResult = await callEdgeFunction('match-knowledge-assets', { tender_id: tenderId });
+        console.log('[BidPilot] match-knowledge-assets result:', matchResult);
+      } catch (matchErr: any) {
+        console.warn('[BidPilot] match-knowledge-assets failed (non-blocking):', matchErr.message);
+        toast({ title: 'Knowledge matching skipped', description: matchErr.message, variant: 'destructive' });
+      }
+
       setFlowState('ready');
       toast({ title: t('tender.created'), description: t('tender.createdDescription') });
     } catch (err: any) {
