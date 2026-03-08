@@ -78,6 +78,32 @@ export default function CompanyMemory() {
 
   useEffect(() => { loadAssets(); }, []);
 
+  const handleReprocess = async (assetId: string) => {
+    setReprocessingIds(prev => new Set(prev).add(assetId));
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        toast({ title: 'Auth error', description: 'No active session. Please sign in again.', variant: 'destructive' });
+        return;
+      }
+      const { error: fnError } = await supabase.functions.invoke('process-knowledge-assets', {
+        body: { knowledge_asset_id: assetId },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (fnError) {
+        toast({ title: 'Reprocessing failed', description: fnError.message || 'Could not process asset.', variant: 'destructive' });
+      } else {
+        toast({ title: 'Reprocessing started' });
+      }
+      await loadAssets();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setReprocessingIds(prev => { const next = new Set(prev); next.delete(assetId); return next; });
+    }
+  };
+
   const filtered = assets.filter(a => {
     const matchesSearch = !search ||
       a.title.toLowerCase().includes(search.toLowerCase()) ||
