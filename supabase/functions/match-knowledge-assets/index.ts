@@ -43,35 +43,68 @@ serve(async (req) => {
   }
 
   try {
+    console.log("match-knowledge-assets invoked");
+
     const authHeader = req.headers.get("Authorization");
+    console.log("Authorization header present:", !!authHeader);
+
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.error("Missing Authorization header");
+      return new Response(
+        JSON.stringify({ error: "Missing Authorization header" }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     const token = authHeader.replace("Bearer ", "");
+    console.log("Token extracted:", !!token);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const publishableKey = Deno.env.get("SB_PUBLISHABLE_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const authClient = createClient(supabaseUrl, publishableKey, {
-      global: { headers: { Authorization: authHeader } },
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
     });
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(token);
+
     if (claimsError || !claimsData?.claims?.sub) {
-      return new Response(JSON.stringify({ error: "Invalid JWT", details: claimsError }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.error("Invalid JWT", claimsError);
+      return new Response(
+        JSON.stringify({ error: "Invalid JWT", details: claimsError }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     const userId = String(claimsData.claims.sub);
+    console.log("Authenticated user:", userId);
+
+    const { tender_id } = await req.json();
+    console.log("match-knowledge-assets payload:", { tender_id });
+
+    if (!tender_id) {
+      console.error("Missing tender_id");
+      return new Response(
+        JSON.stringify({ error: "Missing tender_id" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
 
     const { data: profile, error: profileError } = await authClient
       .from("profiles")
@@ -80,19 +113,17 @@ serve(async (req) => {
       .single();
 
     if (profileError || !profile?.organization_id) {
-      return new Response(JSON.stringify({ error: "Profile not found or no organization", details: profileError }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.error("Profile not found or no organization", profileError);
+      return new Response(
+        JSON.stringify({ error: "Profile not found or no organization", details: profileError }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
-    const { tender_id } = await req.json();
-    if (!tender_id) {
-      return new Response(JSON.stringify({ error: "Missing tender_id" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    console.log("Caller organization:", profile.organization_id);
 
     const { data: tender, error: tenderError } = await adminClient
       .from("tenders")
@@ -101,17 +132,25 @@ serve(async (req) => {
       .single();
 
     if (tenderError || !tender) {
-      return new Response(JSON.stringify({ error: "Tender not found", details: tenderError }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.error("Tender not found", tenderError);
+      return new Response(
+        JSON.stringify({ error: "Tender not found", details: tenderError }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     if (tender.organization_id !== profile.organization_id) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.error("Forbidden: tender belongs to different organization");
+      return new Response(
+        JSON.stringify({ error: "Forbidden" }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     const { data: requirements, error: requirementsError } = await adminClient
@@ -120,10 +159,14 @@ serve(async (req) => {
       .eq("tender_id", tender_id);
 
     if (requirementsError) {
-      return new Response(JSON.stringify({ error: "Failed to load requirements", details: requirementsError }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.error("Failed to load requirements", requirementsError);
+      return new Response(
+        JSON.stringify({ error: "Failed to load requirements", details: requirementsError }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     const { data: assets, error: assetsError } = await adminClient
@@ -132,28 +175,51 @@ serve(async (req) => {
       .eq("organization_id", profile.organization_id);
 
     if (assetsError) {
-      return new Response(JSON.stringify({ error: "Failed to load knowledge assets", details: assetsError }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.error("Failed to load knowledge assets", assetsError);
+      return new Response(
+        JSON.stringify({ error: "Failed to load knowledge assets", details: assetsError }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
+
+    console.log("Requirements loaded:", requirements?.length ?? 0);
+    console.log("Knowledge assets loaded:", assets?.length ?? 0);
 
     if (!requirements?.length || !assets?.length) {
-      return new Response(JSON.stringify({
-        success: true,
-        message: "No requirements or no knowledge assets available for matching",
-        tender_id,
-        inserted_matches: 0,
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.log("No requirements or no assets available for matching");
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "No requirements or no knowledge assets available for matching",
+          tender_id,
+          inserted_matches: 0,
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
-    await adminClient
+    console.log("Deleting old matches for tender", tender_id);
+    const { error: deleteError } = await adminClient
       .from("requirement_matches")
       .delete()
       .eq("tender_id", tender_id);
+
+    if (deleteError) {
+      console.error("Failed to delete previous matches", deleteError);
+      return new Response(
+        JSON.stringify({ error: "Failed to delete previous matches", details: deleteError }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
 
     const rowsToInsert: Array<{
       organization_id: string;
@@ -198,36 +264,53 @@ serve(async (req) => {
       }
     }
 
+    console.log("Prepared matches to insert:", rowsToInsert.length);
+
     if (rowsToInsert.length > 0) {
       const { error: insertError } = await adminClient
         .from("requirement_matches")
         .insert(rowsToInsert);
 
       if (insertError) {
-        return new Response(JSON.stringify({ error: "Failed to insert requirement matches", details: insertError }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        console.error("Failed to insert requirement matches", insertError);
+        return new Response(
+          JSON.stringify({ error: "Failed to insert requirement matches", details: insertError }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
       }
     }
 
-    return new Response(JSON.stringify({
-      success: true,
+    console.log("match-knowledge-assets completed", {
       tender_id,
       inserted_matches: rowsToInsert.length,
-    }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        tender_id,
+        inserted_matches: rowsToInsert.length,
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   } catch (error) {
     console.error("match-knowledge-assets error:", error);
 
-    return new Response(JSON.stringify({
-      error: "Unexpected error",
-      details: String(error),
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        error: "Unexpected error",
+        details: String(error),
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   }
 });
