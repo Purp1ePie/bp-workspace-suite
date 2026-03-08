@@ -5,6 +5,7 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/process-tender/deno.json"
 entrypoint = "./functions/process-tender/index.ts"
+
 [functions.match-knowledge-assets]
 enabled = true
 verify_jwt = false
