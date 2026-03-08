@@ -2,31 +2,39 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
+import { useAuth } from '@/hooks/useAuth';
 import { StatusBadge } from '@/components/StatusBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
-import { FolderPlus, Clock, Upload, BarChart3, ArrowRight } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import {
+  FolderPlus, Clock, Upload, BarChart3, ArrowRight,
+  Folders, CalendarClock, FileText, CheckSquare,
+} from 'lucide-react';
+import { formatDistanceToNow, format } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Tender = Tables<'tenders'>;
 type TenderDocument = Tables<'tender_documents'>;
 type Deadline = Tables<'deadlines'>;
+type ChecklistItem = Tables<'checklist_items'>;
 
 export default function Dashboard() {
   const { t, language } = useI18n();
+  const { user } = useAuth();
   const [tenders, setTenders] = useState<Tender[]>([]);
   const [deadlines, setDeadlines] = useState<(Deadline & { tender_title?: string })[]>([]);
   const [recentDocs, setRecentDocs] = useState<(TenderDocument & { tender_title?: string })[]>([]);
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      const [tendersRes, deadlinesRes, docsRes] = await Promise.all([
-        supabase.from('tenders').select('*').order('created_at', { ascending: false }).limit(20),
-        supabase.from('deadlines').select('*').order('due_at', { ascending: true }).limit(5),
+      const [tendersRes, deadlinesRes, docsRes, checkRes] = await Promise.all([
+        supabase.from('tenders').select('*').order('created_at', { ascending: false }).limit(50),
+        supabase.from('deadlines').select('*').order('due_at', { ascending: true }).limit(8),
         supabase.from('tender_documents').select('*').order('created_at', { ascending: false }).limit(5),
+        supabase.from('checklist_items').select('*').eq('status', 'open').order('due_at', { ascending: true }).limit(8),
       ]);
 
       const tendersList = tendersRes.data || [];
@@ -44,6 +52,7 @@ export default function Dashboard() {
         tender_title: tenderMap.get(d.tender_id) || '',
       })));
 
+      setChecklistItems(checkRes.data || []);
       setLoading(false);
     };
     load();
@@ -65,10 +74,21 @@ export default function Dashboard() {
     );
   }
 
+  const statCards = [
+    { label: t('dashboard.totalTenders'), value: tenders.length, icon: Folders, color: 'text-primary' },
+    { label: t('dashboard.pendingDeadlines'), value: deadlines.length, icon: CalendarClock, color: 'text-warning' },
+    { label: t('dashboard.documentsUploaded'), value: recentDocs.length, icon: FileText, color: 'text-info' },
+    { label: t('dashboard.openItems'), value: checklistItems.length, icon: CheckSquare, color: 'text-destructive' },
+  ];
+
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold font-heading">{t('dashboard.title')}</h1>
+        <div>
+          <h1 className="text-2xl font-bold font-heading">{t('dashboard.title')}</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{t('dashboard.welcome')}</p>
+        </div>
         <Link to="/tenders/new">
           <Button size="sm">
             <FolderPlus className="h-4 w-4 mr-1.5" />
@@ -77,29 +97,46 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* Stats row */}
+      {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {Object.entries(statusCounts).map(([status, count]) => (
-          <div key={status} className="glass-card p-4">
-            <div className="flex items-center justify-between mb-1">
-              <StatusBadge status={status} />
-              <span className="text-2xl font-bold font-heading">{count}</span>
+        {statCards.map((stat) => (
+          <div key={stat.label} className="glass-card p-4">
+            <div className="flex items-center justify-between">
+              <stat.icon className={`h-5 w-5 ${stat.color}`} />
+              <span className="text-2xl font-bold font-heading">{stat.value}</span>
             </div>
+            <p className="text-xs text-muted-foreground mt-2">{stat.label}</p>
           </div>
         ))}
-        {Object.keys(statusCounts).length === 0 && (
-          <div className="glass-card p-4 col-span-full">
-            <p className="text-sm text-muted-foreground">{t('dashboard.bidStatus')}: {t('common.empty')}</p>
-          </div>
-        )}
       </div>
+
+      {/* Bid Status Summary */}
+      {Object.keys(statusCounts).length > 0 && (
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 className="h-4 w-4 text-primary" />
+            <h2 className="font-semibold font-heading text-sm">{t('dashboard.bidStatus')}</h2>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(statusCounts).map(([status, count]) => (
+              <div key={status} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted">
+                <StatusBadge status={status} />
+                <span className="text-sm font-semibold font-heading">{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Active Tenders */}
         <div className="glass-card">
-          <div className="px-5 py-4 border-b border-border flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-primary" />
-            <h2 className="font-semibold font-heading text-sm">{t('dashboard.activeTenders')}</h2>
+          <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Folders className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold font-heading text-sm">{t('dashboard.activeTenders')}</h2>
+            </div>
+            <Link to="/tenders" className="text-xs text-primary hover:underline">{t('dashboard.viewAll')}</Link>
           </div>
           {activeTenders.length === 0 ? (
             <EmptyState
@@ -114,17 +151,17 @@ export default function Dashboard() {
             />
           ) : (
             <div className="divide-y divide-border">
-              {activeTenders.slice(0, 5).map((tender) => (
+              {activeTenders.slice(0, 6).map((tender) => (
                 <Link
                   key={tender.id}
                   to={`/tenders/${tender.id}`}
-                  className="flex items-center justify-between px-5 py-3 hover:bg-accent/50 transition-colors"
+                  className="flex items-center justify-between px-5 py-3 hover:bg-accent/30 transition-colors"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium truncate">{tender.title}</p>
-                    <p className="text-xs text-muted-foreground">{tender.issuer || '—'}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{tender.issuer || '—'}</p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
                     <StatusBadge status={tender.status} />
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
                   </div>
@@ -146,11 +183,43 @@ export default function Dashboard() {
             <div className="divide-y divide-border">
               {deadlines.map((dl) => (
                 <div key={dl.id} className="px-5 py-3">
-                  <p className="text-sm font-medium">{dl.deadline_type}</p>
-                  <p className="text-xs text-muted-foreground">{dl.tender_title}</p>
-                  <p className="text-xs text-warning mt-0.5">
-                    {formatDistanceToNow(new Date(dl.due_at), { addSuffix: true, locale: dateFnsLocale })}
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">{dl.deadline_type}</p>
+                    <span className="text-xs font-medium text-warning">
+                      {formatDistanceToNow(new Date(dl.due_at), { addSuffix: true, locale: dateFnsLocale })}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{dl.tender_title}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Open Checklist Items */}
+        <div className="glass-card">
+          <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckSquare className="h-4 w-4 text-destructive" />
+              <h2 className="font-semibold font-heading text-sm">{t('dashboard.openChecklist')}</h2>
+            </div>
+            <Link to="/checklist" className="text-xs text-primary hover:underline">{t('dashboard.viewAll')}</Link>
+          </div>
+          {checklistItems.length === 0 ? (
+            <EmptyState icon={CheckSquare} title={t('dashboard.noChecklist')} />
+          ) : (
+            <div className="divide-y divide-border">
+              {checklistItems.slice(0, 5).map((item) => (
+                <div key={item.id} className="px-5 py-3 flex items-center gap-3">
+                  <div className="h-4 w-4 rounded border border-border shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm truncate">{item.title}</p>
+                    {item.due_at && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {format(new Date(item.due_at), 'dd.MM.yyyy')}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -158,7 +227,7 @@ export default function Dashboard() {
         </div>
 
         {/* Recent Uploads */}
-        <div className="glass-card lg:col-span-2">
+        <div className="glass-card">
           <div className="px-5 py-4 border-b border-border flex items-center gap-2">
             <Upload className="h-4 w-4 text-info" />
             <h2 className="font-semibold font-heading text-sm">{t('dashboard.recentUploads')}</h2>
@@ -169,11 +238,14 @@ export default function Dashboard() {
             <div className="divide-y divide-border">
               {recentDocs.map((doc) => (
                 <div key={doc.id} className="px-5 py-3 flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{doc.file_name}</p>
-                    <p className="text-xs text-muted-foreground">{doc.tender_title}</p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <p className="text-sm font-medium truncate">{doc.file_name}</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 ml-5.5">{doc.tender_title}</p>
                   </div>
-                  <span className="text-xs text-muted-foreground shrink-0">
+                  <span className="text-xs text-muted-foreground shrink-0 ml-3">
                     {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true, locale: dateFnsLocale })}
                   </span>
                 </div>
