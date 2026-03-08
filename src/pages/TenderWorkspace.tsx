@@ -70,30 +70,49 @@ export default function TenderWorkspace() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [savingSection, setSavingSection] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+
+  const loadData = useCallback(async () => {
+    if (!id) return;
+    const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes] = await Promise.all([
+      supabase.from('tenders').select('*').eq('id', id).single(),
+      supabase.from('tender_documents').select('*').eq('tender_id', id).order('created_at', { ascending: false }),
+      supabase.from('requirements').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
+      supabase.from('risks').select('*').eq('tender_id', id),
+      supabase.from('deadlines').select('*').eq('tender_id', id).order('due_at', { ascending: true }),
+      supabase.from('response_sections').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
+      supabase.from('checklist_items').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
+    ]);
+    setTender(tRes.data);
+    setDocs(dRes.data || []);
+    setRequirements(rRes.data || []);
+    setRisks(rkRes.data || []);
+    setDeadlines(dlRes.data || []);
+    setSections(sRes.data || []);
+    setChecklist(cRes.data || []);
+    setLoading(false);
+  }, [id]);
 
   useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleRetryProcessing = async () => {
     if (!id) return;
-    const load = async () => {
-      const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes] = await Promise.all([
-        supabase.from('tenders').select('*').eq('id', id).single(),
-        supabase.from('tender_documents').select('*').eq('tender_id', id).order('created_at', { ascending: false }),
-        supabase.from('requirements').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
-        supabase.from('risks').select('*').eq('tender_id', id),
-        supabase.from('deadlines').select('*').eq('tender_id', id).order('due_at', { ascending: true }),
-        supabase.from('response_sections').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
-        supabase.from('checklist_items').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
-      ]);
-      setTender(tRes.data);
-      setDocs(dRes.data || []);
-      setRequirements(rRes.data || []);
-      setRisks(rkRes.data || []);
-      setDeadlines(dlRes.data || []);
-      setSections(sRes.data || []);
-      setChecklist(cRes.data || []);
-      setLoading(false);
-    };
-    load();
-  }, [id]);
+    setRetrying(true);
+    try {
+      const { error } = await supabase.functions.invoke('process-tender', {
+        body: { tender_id: id },
+      });
+      if (error) throw error;
+      toast({ title: t('tender.analysisReady') });
+      await loadData();
+    } catch (err: any) {
+      toast({ title: t('workspace.processingFailed'), description: err.message, variant: 'destructive' });
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const handleSaveDraft = async (sectionId: string, text: string) => {
     setSavingSection(sectionId);
