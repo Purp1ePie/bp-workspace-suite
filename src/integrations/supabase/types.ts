@@ -206,6 +206,9 @@ export type Database = {
           extracted_text: string | null
           id: string
           organization_id: string
+          parse_error: string | null
+          parse_status: string
+          processed_at: string | null
           storage_path: string | null
           tags: string[]
           title: string
@@ -217,6 +220,9 @@ export type Database = {
           extracted_text?: string | null
           id?: string
           organization_id: string
+          parse_error?: string | null
+          parse_status?: string
+          processed_at?: string | null
           storage_path?: string | null
           tags?: string[]
           title: string
@@ -228,6 +234,9 @@ export type Database = {
           extracted_text?: string | null
           id?: string
           organization_id?: string
+          parse_error?: string | null
+          parse_status?: string
+          processed_at?: string | null
           storage_path?: string | null
           tags?: string[]
           title?: string

@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { BookOpen, Upload, Search, X, FileText, Loader2, Database, Tag, FolderOpen } from 'lucide-react';
+import { BookOpen, Upload, Search, X, FileText, Loader2, Database, Tag, FolderOpen, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
+import { StatusBadge } from '@/components/StatusBadge';
 import { formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
 import type { Tables } from '@/integrations/supabase/types';
@@ -25,6 +26,29 @@ const typeIcons: Record<string, string> = {
   template: '📄',
   past_answer: '💬',
 };
+
+function ParseStatusIndicator({ status }: { status: string }) {
+  if (status === 'parsed') return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-success/15 text-success font-medium">
+      <CheckCircle2 className="h-3 w-3" /> Parsed
+    </span>
+  );
+  if (status === 'processing') return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-warning/15 text-warning font-medium">
+      <Loader2 className="h-3 w-3 animate-spin" /> Processing
+    </span>
+  );
+  if (status === 'failed') return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-destructive/15 text-destructive font-medium">
+      <AlertCircle className="h-3 w-3" /> Failed
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
+      <Clock className="h-3 w-3" /> Pending
+    </span>
+  );
+}
 
 export default function CompanyMemory() {
   const { t, language } = useI18n();
@@ -83,13 +107,13 @@ export default function CompanyMemory() {
       }
 
       const tags = assetTags.split(',').map(t => t.trim()).filter(Boolean);
-      const { error } = await supabase.from('knowledge_assets').insert({
+      const { data: insertedRow, error } = await supabase.from('knowledge_assets').insert({
         title: assetTitle,
         asset_type: assetType,
         organization_id: orgId,
         storage_path: storagePath,
         tags,
-      });
+      }).select('id').single();
       if (error) throw error;
 
       toast({ title: t('common.success') });
@@ -98,6 +122,25 @@ export default function CompanyMemory() {
       setAssetTags('');
       setFile(null);
       loadAssets();
+
+      // Trigger processing via Edge Function
+      if (insertedRow?.id) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+        if (!accessToken) {
+          toast({ title: 'Auth error', description: 'No active session. Please sign in again.', variant: 'destructive' });
+          return;
+        }
+        const { error: fnError } = await supabase.functions.invoke('process-knowledge-assets', {
+          body: { knowledge_asset_id: insertedRow.id },
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (fnError) {
+          console.error('process-knowledge-assets error:', fnError);
+          toast({ title: 'Processing failed', description: fnError.message || 'Could not process asset.', variant: 'destructive' });
+        }
+        loadAssets();
+      }
     } catch (err: any) {
       toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
     } finally {
@@ -267,11 +310,20 @@ export default function CompanyMemory() {
                 <span className="text-xl">{typeIcons[asset.asset_type] || '📎'}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium leading-tight group-hover:text-primary transition-colors">{asset.title}</p>
-                  <span className="inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold uppercase tracking-wider">
-                    {t(`memory.types.${asset.asset_type}` as any)}
-                  </span>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold uppercase tracking-wider">
+                      {t(`memory.types.${asset.asset_type}` as any)}
+                    </span>
+                    <ParseStatusIndicator status={asset.parse_status} />
+                  </div>
                 </div>
               </div>
+              {asset.parse_status === 'failed' && asset.parse_error && (
+                <div className="mt-2 flex items-start gap-1.5 text-xs text-destructive bg-destructive/10 rounded-md px-2.5 py-1.5">
+                  <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span className="line-clamp-2">{asset.parse_error}</span>
+                </div>
+              )}
               {asset.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-3">
                   {asset.tags.map(tag => (
