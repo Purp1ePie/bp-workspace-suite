@@ -1,10 +1,349 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { extractText, getDocumentProxy } from "unpdf";
+import { unzipSync } from "fflate";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const OPENAI_MODEL = "gpt-4o";
+const MAX_EXTRACTION_CHARS = 40000;
+const OPENAI_TIMEOUT_MS = 50000;
+
+interface ExtractedRequirement {
+  category: string;
+  text: string;
+  mandatory: boolean;
+}
+
+interface ExtractedDeadline {
+  deadline_type: string;
+  due_at: string;
+  description: string;
+}
+
+interface ExtractedRisk {
+  risk_type: string;
+  severity: string;
+  description: string;
+}
+
+interface ExtractionResult {
+  requirements: ExtractedRequirement[];
+  deadlines: ExtractedDeadline[];
+  risks: ExtractedRisk[];
+}
+
+async function extractWithOpenAI(
+  combinedText: string,
+  tenderTitle: string,
+): Promise<ExtractionResult> {
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY secret is not configured");
+  }
+
+  const systemPrompt = `You are an expert procurement analyst specializing in public and private tender documents. Your task is to extract structured data from tender document text.
+
+The tender documents may be written in German, English, French, or Italian. Regardless of the document language, you MUST return all extracted text fields in the SAME language as the original document. Do not translate.
+
+Extract the following:
+
+## Requirements
+Identify all requirements the bidder must fulfill. For each requirement:
+- "category": One of "technical", "commercial", "reference", "administrative", "legal"
+  - technical: technical specifications, service descriptions, implementation requirements, SLAs, quality standards
+  - commercial: pricing format, payment terms, financial conditions, insurance requirements
+  - reference: customer references, project references, case studies required
+  - administrative: forms to fill, documents to submit, formatting requirements, certifications to provide
+  - legal: legal compliance, NDAs, contract terms, regulatory requirements
+- "text": The requirement described clearly and concisely (one sentence, max 200 characters). Keep the original document language.
+- "mandatory": true if the document uses words like "must", "shall", "required", "mandatory", "muss", "zwingend", "obligatoire", "obbligatorio", or similar. false if optional/recommended.
+
+## Deadlines
+Identify all dates and deadlines mentioned. For each:
+- "deadline_type": One of "submission", "clarification", "site_visit", "q_and_a", "award", "contract_start", "other"
+- "due_at": ISO 8601 datetime string (e.g. "2025-06-15T17:00:00Z"). If only a date is given with no time, use T23:59:00Z. If the year is missing, assume the current or next upcoming year.
+- "description": Brief description of what this deadline is for, in the original document language.
+
+## Risks
+Identify potential risks or concerns a bidder should be aware of. For each:
+- "risk_type": One of "missing_information", "tight_deadline", "unusual_requirement", "high_penalty", "scope_ambiguity", "resource_intensive", "legal_risk", "financial_risk"
+- "severity": One of "low", "medium", "high", "critical"
+- "description": Brief description of the risk, in the original document language.
+
+Return ONLY a valid JSON object with this exact structure (no markdown, no explanation, no wrapping):
+{
+  "requirements": [...],
+  "deadlines": [...],
+  "risks": [...]
+}
+
+If you cannot find any items for a category, return an empty array for that category. Do not fabricate data that is not supported by the document text.`;
+
+  const userPrompt = `Tender title: "${tenderTitle}"\n\nDocument text:\n${combinedText}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.1,
+        max_tokens: 4096,
+        response_format: { type: "json_object" },
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`OpenAI API error ${response.status}: ${errorBody}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+
+    if (!content) {
+      throw new Error("OpenAI returned empty content");
+    }
+
+    console.log("OpenAI raw response length:", content.length);
+
+    const parsed = JSON.parse(content) as ExtractionResult;
+
+    if (!Array.isArray(parsed.requirements)) parsed.requirements = [];
+    if (!Array.isArray(parsed.deadlines)) parsed.deadlines = [];
+    if (!Array.isArray(parsed.risks)) parsed.risks = [];
+
+    parsed.deadlines = parsed.deadlines.filter((d) => {
+      try {
+        const date = new Date(d.due_at);
+        return !isNaN(date.getTime());
+      } catch {
+        console.warn("Dropping deadline with invalid date:", d.due_at);
+        return false;
+      }
+    });
+
+    const validSeverities = new Set(["low", "medium", "high", "critical"]);
+    parsed.risks = parsed.risks.map((r) => ({
+      ...r,
+      severity: validSeverities.has(r.severity) ? r.severity : "medium",
+    }));
+
+    return parsed;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("OpenAI API request timed out after " + OPENAI_TIMEOUT_MS + "ms");
+    }
+    throw err;
+  }
+}
+
+function stripHtml(input: string): string {
+  return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function truncate(input: string, max = 50000): string {
+  return input.length > max ? input.slice(0, max) : input;
+}
+
+function getExtension(path: string): string {
+  const parts = path.toLowerCase().split(".");
+  return parts.length > 1 ? parts.pop() || "" : "";
+}
+
+async function readPdf(bytes: Uint8Array): Promise<string> {
+  const pdf = await getDocumentProxy(new Uint8Array(bytes));
+  const result = await extractText(pdf, { mergePages: true });
+  const text = typeof result.text === "string" ? result.text : result.text.join("\n");
+  console.log("PDF parsed:", result.totalPages, "pages,", text.length, "chars");
+  return text;
+}
+
+/** Extract text content from XML tags, handling nested tags and XML entities */
+function extractXmlText(xml: string): string {
+  return xml
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .trim();
+}
+
+function readDocx(bytes: Uint8Array): string {
+  const unzipped = unzipSync(bytes);
+  const docXml = unzipped["word/document.xml"];
+  if (!docXml) {
+    throw new Error("Invalid DOCX: word/document.xml not found");
+  }
+  const xmlString = new TextDecoder().decode(docXml);
+  const paragraphs: string[] = [];
+  // Match <w:p ...>...</w:p> paragraphs (handles both w:p and default namespace)
+  const pRegex = /<w:p[\s>][\s\S]*?<\/w:p>/g;
+  let pMatch;
+  while ((pMatch = pRegex.exec(xmlString)) !== null) {
+    // Extract all <w:t> text within this paragraph
+    const tRegex = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+    const paraText: string[] = [];
+    let tMatch;
+    while ((tMatch = tRegex.exec(pMatch[0])) !== null) {
+      const text = extractXmlText(tMatch[1]);
+      if (text) paraText.push(text);
+    }
+    if (paraText.length > 0) {
+      paragraphs.push(paraText.join(""));
+    }
+  }
+  const text = paragraphs.join("\n");
+  console.log("DOCX parsed:", paragraphs.length, "paragraphs,", text.length, "chars");
+  return text;
+}
+
+function readXlsx(bytes: Uint8Array): string {
+  const unzipped = unzipSync(bytes);
+
+  // Parse shared strings using regex
+  const sharedStrings: string[] = [];
+  const ssFile = unzipped["xl/sharedStrings.xml"];
+  if (ssFile) {
+    const ssXml = new TextDecoder().decode(ssFile);
+    const siRegex = /<si[\s>][\s\S]*?<\/si>/g;
+    let siMatch;
+    while ((siMatch = siRegex.exec(ssXml)) !== null) {
+      const tRegex = /<t[^>]*>([\s\S]*?)<\/t>/g;
+      const parts: string[] = [];
+      let tMatch;
+      while ((tMatch = tRegex.exec(siMatch[0])) !== null) {
+        parts.push(extractXmlText(tMatch[1]));
+      }
+      sharedStrings.push(parts.join(""));
+    }
+  }
+
+  // Parse each worksheet
+  const allRows: string[] = [];
+  let sheetIndex = 1;
+  while (true) {
+    const sheetFile = unzipped[`xl/worksheets/sheet${sheetIndex}.xml`];
+    if (!sheetFile) break;
+
+    const sheetXml = new TextDecoder().decode(sheetFile);
+    if (sheetIndex > 1) allRows.push(`\n--- Sheet ${sheetIndex} ---`);
+
+    const rowRegex = /<row[\s>][\s\S]*?<\/row>/g;
+    let rowMatch;
+    while ((rowMatch = rowRegex.exec(sheetXml)) !== null) {
+      const cellRegex = /<c\s[^>]*>[\s\S]*?<\/c>|<c\s[^>]*\/>/g;
+      const cellValues: string[] = [];
+      let cellMatch;
+      while ((cellMatch = cellRegex.exec(rowMatch[0])) !== null) {
+        const cellXml = cellMatch[0];
+        const typeMatch = cellXml.match(/\bt="([^"]*)"/);
+        const cellType = typeMatch ? typeMatch[1] : "";
+        // Check for inline string
+        const isMatch = cellXml.match(/<is[\s>][\s\S]*?<\/is>/);
+        if (isMatch) {
+          const tRegex2 = /<t[^>]*>([\s\S]*?)<\/t>/g;
+          const parts: string[] = [];
+          let tM;
+          while ((tM = tRegex2.exec(isMatch[0])) !== null) {
+            parts.push(extractXmlText(tM[1]));
+          }
+          if (parts.length > 0) cellValues.push(parts.join(""));
+        } else {
+          const vMatch = cellXml.match(/<v[^>]*>([\s\S]*?)<\/v>/);
+          if (vMatch) {
+            const raw = extractXmlText(vMatch[1]);
+            if (cellType === "s") {
+              const idx = parseInt(raw, 10);
+              cellValues.push(sharedStrings[idx] || raw);
+            } else {
+              cellValues.push(raw);
+            }
+          }
+        }
+      }
+      if (cellValues.length > 0) {
+        allRows.push(cellValues.join("\t"));
+      }
+    }
+    sheetIndex++;
+  }
+
+  const text = allRows.join("\n");
+  console.log("XLSX parsed:", sheetIndex - 1, "sheets,", text.length, "chars");
+  return text;
+}
+
+async function readTextFromFile(
+  bytes: Uint8Array,
+  extension: string,
+): Promise<{ text: string | null; error: string | null }> {
+  try {
+    if (extension === "pdf") {
+      const text = await readPdf(bytes);
+      if (!text || text.trim().length === 0) {
+        return { text: null, error: "PDF contains no extractable text (may be scanned/image-based)" };
+      }
+      return { text: truncate(text), error: null };
+    }
+
+    if (extension === "docx") {
+      const text = readDocx(bytes);
+      if (!text || text.trim().length === 0) {
+        return { text: null, error: "DOCX contains no extractable text" };
+      }
+      return { text: truncate(text), error: null };
+    }
+
+    if (extension === "xlsx" || extension === "xls") {
+      const text = readXlsx(bytes);
+      if (!text || text.trim().length === 0) {
+        return { text: null, error: "Excel file contains no extractable text" };
+      }
+      return { text: truncate(text), error: null };
+    }
+
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+
+    if (["txt", "md", "csv", "json", "xml", "yaml", "yml"].includes(extension)) {
+      return { text: truncate(decoded), error: null };
+    }
+
+    if (["html", "htm"].includes(extension)) {
+      return { text: truncate(stripHtml(decoded)), error: null };
+    }
+
+    return {
+      text: null,
+      error: `Unsupported file type for current parser: .${extension}`,
+    };
+  } catch (err) {
+    return {
+      text: null,
+      error: `Failed to parse .${extension} file: ${String(err)}`,
+    };
+  }
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -133,7 +472,7 @@ serve(async (req) => {
 
     const { data: documents, error: docsError } = await adminClient
       .from("tender_documents")
-      .select("id, file_name, parse_status")
+      .select("id, file_name, storage_path, parse_status")
       .eq("tender_id", tender_id);
 
     if (docsError) {
@@ -178,107 +517,154 @@ serve(async (req) => {
       .update({ parse_status: "processing" })
       .in("id", documentIds);
 
-    console.log("Simulating parsing for documents");
+    console.log("Parsing tender documents");
     for (const doc of documents) {
-      const placeholderText = `Parsed placeholder text for ${doc.file_name}. This is the first version of BidPilot document processing.`;
+      console.log("Processing document:", doc.id, doc.file_name, doc.storage_path);
 
-      console.log("Parsing document:", doc.id, doc.file_name);
+      if (!doc.storage_path) {
+        console.error("No storage_path for document", doc.id);
+        await adminClient
+          .from("tender_documents")
+          .update({
+            parse_status: "failed",
+            parse_error: "No storage_path found on document",
+          })
+          .eq("id", doc.id);
+        continue;
+      }
 
+      const { data: fileData, error: downloadError } = await adminClient
+        .storage
+        .from("tender-files")
+        .download(doc.storage_path);
+
+      if (downloadError || !fileData) {
+        console.error("Storage download failed for", doc.file_name, downloadError);
+        await adminClient
+          .from("tender_documents")
+          .update({
+            parse_status: "failed",
+            parse_error: `Storage download failed: ${downloadError?.message || "unknown error"}`,
+          })
+          .eq("id", doc.id);
+        continue;
+      }
+
+      const bytes = new Uint8Array(await fileData.arrayBuffer());
+      const extension = getExtension(doc.storage_path);
+      console.log("Extracting text from", doc.file_name, "extension:", extension);
+
+      const { text, error: parseError } = await readTextFromFile(bytes, extension);
+
+      if (!text) {
+        console.error("Parse failed for", doc.file_name, parseError);
+        await adminClient
+          .from("tender_documents")
+          .update({
+            parse_status: "failed",
+            parse_error: parseError,
+          })
+          .eq("id", doc.id);
+        continue;
+      }
+
+      console.log("Document parsed:", doc.file_name, text.length, "chars");
       await adminClient
         .from("tender_documents")
         .update({
           parse_status: "parsed",
-          parsed_text: placeholderText,
+          parsed_text: text,
+          parse_error: null,
         })
         .eq("id", doc.id);
     }
 
-    console.log("Checking for existing requirements, deadlines and risks");
+    // --- AI Extraction Phase ---
+    console.log("Gathering parsed text for AI extraction");
 
-    const { count: existingRequirements } = await adminClient
-      .from("requirements")
-      .select("*", { count: "exact", head: true })
-      .eq("tender_id", tender_id);
+    const { data: parsedDocs } = await adminClient
+      .from("tender_documents")
+      .select("id, file_name, parsed_text")
+      .eq("tender_id", tender_id)
+      .eq("parse_status", "parsed")
+      .not("parsed_text", "is", null);
 
-    const { count: existingDeadlines } = await adminClient
-      .from("deadlines")
-      .select("*", { count: "exact", head: true })
-      .eq("tender_id", tender_id);
-
-    const { count: existingRisks } = await adminClient
-      .from("risks")
-      .select("*", { count: "exact", head: true })
-      .eq("tender_id", tender_id);
-
-    console.log("Existing counts:", {
-      existingRequirements,
-      existingDeadlines,
-      existingRisks,
-    });
-
-    if (!existingRequirements || existingRequirements === 0) {
-      console.log("Inserting sample requirements");
-
-      await adminClient.from("requirements").insert([
-        {
-          tender_id,
-          organization_id: tender.organization_id,
-          category: "technical",
-          text: "Provide a detailed service description and implementation approach.",
-          mandatory: true,
-        },
-        {
-          tender_id,
-          organization_id: tender.organization_id,
-          category: "commercial",
-          text: "Submit pricing in the requested format.",
-          mandatory: true,
-        },
-        {
-          tender_id,
-          organization_id: tender.organization_id,
-          category: "reference",
-          text: "Include at least two relevant customer references.",
-          mandatory: false,
-        },
-      ]);
-    } else {
-      console.log("Skipping requirements insert, already exist");
+    const textParts: string[] = [];
+    if (parsedDocs) {
+      for (const doc of parsedDocs) {
+        if (doc.parsed_text) {
+          textParts.push(`--- Document: ${doc.file_name} ---\n${doc.parsed_text}`);
+        }
+      }
     }
 
-    if (!existingDeadlines || existingDeadlines === 0) {
-      console.log("Inserting sample deadline");
+    const combined = textParts.join("\n\n");
+    const combinedText = combined.length > MAX_EXTRACTION_CHARS
+      ? combined.slice(0, MAX_EXTRACTION_CHARS) + "\n[... text truncated ...]"
+      : combined;
 
-      const dueAt = new Date();
-      dueAt.setDate(dueAt.getDate() + 7);
-
-      await adminClient.from("deadlines").insert([
-        {
-          tender_id,
-          organization_id: tender.organization_id,
-          deadline_type: "submission",
-          due_at: dueAt.toISOString(),
-          description: "Sample extracted submission deadline",
-        },
-      ]);
+    if (!combinedText || combinedText.trim().length === 0) {
+      console.log("No parsed text available for extraction, skipping AI step");
     } else {
-      console.log("Skipping deadline insert, already exists");
-    }
+      console.log("Combined text for extraction:", combinedText.length, "chars");
 
-    if (!existingRisks || existingRisks === 0) {
-      console.log("Inserting sample risk");
+      // Delete existing data to support reprocessing (requirement_matches cascades via FK)
+      console.log("Deleting existing requirements, deadlines, and risks for reprocessing");
+      await adminClient.from("requirements").delete().eq("tender_id", tender_id);
+      await adminClient.from("deadlines").delete().eq("tender_id", tender_id);
+      await adminClient.from("risks").delete().eq("tender_id", tender_id);
 
-      await adminClient.from("risks").insert([
-        {
-          tender_id,
-          organization_id: tender.organization_id,
-          risk_type: "missing_information",
-          severity: "medium",
-          description: "Tender may require additional clarification on scope and deliverables.",
-        },
-      ]);
-    } else {
-      console.log("Skipping risk insert, already exists");
+      try {
+        console.log("Calling OpenAI for extraction");
+        const extraction = await extractWithOpenAI(combinedText, tender.title || "Untitled Tender");
+
+        console.log("Extraction results:", {
+          requirements: extraction.requirements.length,
+          deadlines: extraction.deadlines.length,
+          risks: extraction.risks.length,
+        });
+
+        if (extraction.requirements.length > 0) {
+          const reqRows = extraction.requirements.map((r) => ({
+            tender_id,
+            organization_id: tender.organization_id,
+            category: r.category,
+            text: r.text,
+            mandatory: r.mandatory,
+          }));
+          const { error: reqError } = await adminClient.from("requirements").insert(reqRows);
+          if (reqError) console.error("Failed to insert requirements:", reqError);
+          else console.log("Inserted", reqRows.length, "requirements");
+        }
+
+        if (extraction.deadlines.length > 0) {
+          const dlRows = extraction.deadlines.map((d) => ({
+            tender_id,
+            organization_id: tender.organization_id,
+            deadline_type: d.deadline_type,
+            due_at: d.due_at,
+            description: d.description,
+          }));
+          const { error: dlError } = await adminClient.from("deadlines").insert(dlRows);
+          if (dlError) console.error("Failed to insert deadlines:", dlError);
+          else console.log("Inserted", dlRows.length, "deadlines");
+        }
+
+        if (extraction.risks.length > 0) {
+          const riskRows = extraction.risks.map((r) => ({
+            tender_id,
+            organization_id: tender.organization_id,
+            risk_type: r.risk_type,
+            severity: r.severity,
+            description: r.description,
+          }));
+          const { error: riskError } = await adminClient.from("risks").insert(riskRows);
+          if (riskError) console.error("Failed to insert risks:", riskError);
+          else console.log("Inserted", riskRows.length, "risks");
+        }
+      } catch (aiError) {
+        console.error("AI extraction failed, continuing without extraction:", aiError);
+      }
     }
 
     console.log("Marking tender ready_for_review");

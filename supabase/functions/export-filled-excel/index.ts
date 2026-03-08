@@ -59,44 +59,57 @@ function parseCellRef(ref: string): { col: string; row: number } {
   return { col: match[1], row: parseInt(match[2], 10) };
 }
 
+/** Extract text content, stripping XML tags and decoding entities */
+function extractXmlText(xml: string): string {
+  return xml
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .trim();
+}
+
 /**
  * Parse worksheet XML to extract cell structure with references and values.
- * Uses DOMParser for reliable XML parsing.
+ * Uses regex-based parsing (DOMParser not available in Deno edge runtime).
  */
 function parseWorksheetStructure(
   sheetXml: string,
   sharedStrings: string[],
 ): CellInfo[] {
-  const ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-  const doc = new DOMParser().parseFromString(sheetXml, "text/xml");
   const cells: CellInfo[] = [];
 
-  const rowElements = doc.getElementsByTagNameNS(ns, "row");
-  for (let r = 0; r < rowElements.length; r++) {
-    const cellElements = rowElements[r].getElementsByTagNameNS(ns, "c");
-    for (let c = 0; c < cellElements.length; c++) {
-      const cellEl = cellElements[c];
-      const ref = cellEl.getAttribute("r") || "";
-      const cellType = cellEl.getAttribute("t") || "";
+  const rowRegex = /<row[\s>][\s\S]*?<\/row>/g;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(sheetXml)) !== null) {
+    const cellRegex = /<c\s[^>]*>[\s\S]*?<\/c>|<c\s[^>]*\/>/g;
+    let cellMatch;
+    while ((cellMatch = cellRegex.exec(rowMatch[0])) !== null) {
+      const cellXml = cellMatch[0];
+      const refMatch = cellXml.match(/\br="([A-Z]+\d+)"/);
+      const ref = refMatch ? refMatch[1] : "";
+      const typeMatch = cellXml.match(/\bt="([^"]*)"/);
+      const cellType = typeMatch ? typeMatch[1] : "";
 
       let value = "";
 
-      // Check for inline string first
-      const isElements = cellEl.getElementsByTagNameNS(ns, "is");
-      if (isElements.length > 0) {
-        const tElements = isElements[0].getElementsByTagNameNS(ns, "t");
+      // Check for inline string
+      const isMatch = cellXml.match(/<is[\s>][\s\S]*?<\/is>/);
+      if (isMatch) {
+        const tRegex = /<t[^>]*>([\s\S]*?)<\/t>/g;
         const parts: string[] = [];
-        for (let t = 0; t < tElements.length; t++) {
-          if (tElements[t].textContent) parts.push(tElements[t].textContent!);
+        let tMatch;
+        while ((tMatch = tRegex.exec(isMatch[0])) !== null) {
+          parts.push(extractXmlText(tMatch[1]));
         }
         value = parts.join("");
       } else {
-        // Check for <v> value element
-        const vElements = cellEl.getElementsByTagNameNS(ns, "v");
-        if (vElements.length > 0 && vElements[0].textContent) {
-          const raw = vElements[0].textContent!;
+        const vMatch = cellXml.match(/<v[^>]*>([\s\S]*?)<\/v>/);
+        if (vMatch) {
+          const raw = extractXmlText(vMatch[1]);
           if (cellType === "s") {
-            // Shared string reference
             const idx = parseInt(raw, 10);
             value = sharedStrings[idx] || raw;
           } else {
@@ -105,8 +118,10 @@ function parseWorksheetStructure(
         }
       }
 
-      const { row } = parseCellRef(ref);
-      cells.push({ ref, value, row });
+      if (ref) {
+        const { row } = parseCellRef(ref);
+        cells.push({ ref, value, row });
+      }
     }
   }
 
@@ -117,18 +132,16 @@ function parseWorksheetStructure(
  * Parse shared strings from xl/sharedStrings.xml
  */
 function parseSharedStrings(xmlBytes: Uint8Array): string[] {
-  const ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-  const doc = new DOMParser().parseFromString(
-    new TextDecoder().decode(xmlBytes),
-    "text/xml",
-  );
+  const ssXml = new TextDecoder().decode(xmlBytes);
   const strings: string[] = [];
-  const siElements = doc.getElementsByTagNameNS(ns, "si");
-  for (let i = 0; i < siElements.length; i++) {
-    const tElements = siElements[i].getElementsByTagNameNS(ns, "t");
+  const siRegex = /<si[\s>][\s\S]*?<\/si>/g;
+  let siMatch;
+  while ((siMatch = siRegex.exec(ssXml)) !== null) {
+    const tRegex = /<t[^>]*>([\s\S]*?)<\/t>/g;
     const parts: string[] = [];
-    for (let j = 0; j < tElements.length; j++) {
-      if (tElements[j].textContent) parts.push(tElements[j].textContent!);
+    let tMatch;
+    while ((tMatch = tRegex.exec(siMatch[0])) !== null) {
+      parts.push(extractXmlText(tMatch[1]));
     }
     strings.push(parts.join(""));
   }
@@ -139,15 +152,12 @@ function parseSharedStrings(xmlBytes: Uint8Array): string[] {
  * Get sheet names from xl/workbook.xml
  */
 function getSheetNames(xmlBytes: Uint8Array): string[] {
-  const ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-  const doc = new DOMParser().parseFromString(
-    new TextDecoder().decode(xmlBytes),
-    "text/xml",
-  );
+  const xml = new TextDecoder().decode(xmlBytes);
   const names: string[] = [];
-  const sheetElements = doc.getElementsByTagNameNS(ns, "sheet");
-  for (let i = 0; i < sheetElements.length; i++) {
-    names.push(sheetElements[i].getAttribute("name") || `Sheet${i + 1}`);
+  const sheetRegex = /<sheet\s[^>]*name="([^"]*)"[^>]*\/?>/g;
+  let match;
+  while ((match = sheetRegex.exec(xml)) !== null) {
+    names.push(match[1]);
   }
   return names;
 }
@@ -210,6 +220,10 @@ function escapeXml(str: string): string {
 /**
  * Modify a worksheet XML to fill in cells with new values.
  * Uses inline strings (t="inlineStr") to avoid shared string table changes.
+ *
+ * Handles two cell formats:
+ *   Self-closing: <c r="B3" s="3" t="n" />
+ *   Full element: <c r="B3" s="3" t="s"><v>0</v></c>
  */
 function modifyWorksheetXml(
   xml: string,
@@ -225,33 +239,29 @@ function modifyWorksheetXml(
     const escapedValue = escapeXml(mapping.value);
     const inlineContent = `<c r="${cellRef}" t="inlineStr"><is><t>${escapedValue}</t></is></c>`;
 
-    // Try to find existing cell element: <c r="B5" ...>...</c> or <c r="B5" .../>
-    // Handle both self-closing and full elements
-    const cellRegex = new RegExp(
-      `<c\\s+[^>]*r="${cellRef}"[^>]*/?>(?:[\\s\\S]*?</c>)?`,
-      "g",
+    // Match self-closing cell: <c r="B3" ... />
+    const selfClosingRegex = new RegExp(
+      `<c\\s[^>]*?r="${cellRef}"[^/]*/>`,
+    );
+    // Match full cell element: <c r="B3" ...>...</c>
+    const fullElementRegex = new RegExp(
+      `<c\\s[^>]*?r="${cellRef}"[^>]*>[\\s\\S]*?</c>`,
     );
 
-    if (cellRegex.test(modified)) {
-      // Replace existing cell
-      modified = modified.replace(cellRegex, inlineContent);
+    if (selfClosingRegex.test(modified)) {
+      modified = modified.replace(selfClosingRegex, inlineContent);
+    } else if (fullElementRegex.test(modified)) {
+      modified = modified.replace(fullElementRegex, inlineContent);
     } else {
       // Cell doesn't exist — insert into the correct row
       const { row } = parseCellRef(cellRef);
-      const rowRegex = new RegExp(
-        `(<row[^>]*r="${row}"[^>]*>)`,
-        "g",
-      );
-      if (rowRegex.test(modified)) {
-        // Insert cell after row opening tag
-        modified = modified.replace(rowRegex, `$1${inlineContent}`);
+      const rowOpenRegex = new RegExp(`(<row[^>]*?r="${row}"[^>]*>)`);
+      if (rowOpenRegex.test(modified)) {
+        modified = modified.replace(rowOpenRegex, `$1${inlineContent}`);
       } else {
-        // Row doesn't exist — insert a new row before </sheetData>
+        // Row doesn't exist — add new row before </sheetData>
         const newRow = `<row r="${row}">${inlineContent}</row>`;
-        modified = modified.replace(
-          "</sheetData>",
-          `${newRow}</sheetData>`,
-        );
+        modified = modified.replace("</sheetData>", `${newRow}</sheetData>`);
       }
     }
   }
