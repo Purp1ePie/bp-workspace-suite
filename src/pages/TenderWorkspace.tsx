@@ -71,6 +71,8 @@ export default function TenderWorkspace() {
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [sections, setSections] = useState<ResponseSection[]>([]);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [matches, setMatches] = useState<RequirementMatch[]>([]);
+  const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
