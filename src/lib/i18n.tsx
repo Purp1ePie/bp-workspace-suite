@@ -135,6 +135,16 @@ const translations = {
   'workspace.allParsed': { de: 'Alle Dokumente verarbeitet', en: 'All documents processed' },
   'workspace.savingDraft': { de: 'Entwurf wird gespeichert...', en: 'Saving draft...' },
   'workspace.draftSaved': { de: 'Entwurf gespeichert', en: 'Draft saved' },
+  'workspace.retryProcessing': { de: 'Verarbeitung erneut starten', en: 'Retry Processing' },
+  'workspace.processingFailed': { de: 'Verarbeitung fehlgeschlagen', en: 'Processing failed' },
+  'workspace.processingFailedHint': { de: 'Die Verarbeitung konnte nicht abgeschlossen werden. Versuchen Sie es erneut.', en: 'Processing could not be completed. Please try again.' },
+
+  // Processing flow
+  'tender.uploadComplete': { de: 'Upload abgeschlossen', en: 'Upload complete' },
+  'tender.processingTender': { de: 'Ausschreibung wird analysiert...', en: 'Processing tender...' },
+  'tender.analysisReady': { de: 'Analyse bereit', en: 'Analysis ready' },
+  'tender.processingFailed': { de: 'Verarbeitung fehlgeschlagen', en: 'Processing failed' },
+  'tender.retryProcessing': { de: 'Erneut verarbeiten', en: 'Retry processing' },
 
   // Parse status
   'workspace.parseStatus.pending': { de: 'Ausstehend', en: 'Pending' },

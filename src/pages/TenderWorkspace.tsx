@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
@@ -9,7 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   ArrowLeft, FileText, AlertTriangle, CheckSquare, BookOpen, Edit, List,
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
-  Loader2, Info,
+  Loader2, Info, RotateCcw, RefreshCw, AlertCircle,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
@@ -70,30 +70,49 @@ export default function TenderWorkspace() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [savingSection, setSavingSection] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+
+  const loadData = useCallback(async () => {
+    if (!id) return;
+    const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes] = await Promise.all([
+      supabase.from('tenders').select('*').eq('id', id).single(),
+      supabase.from('tender_documents').select('*').eq('tender_id', id).order('created_at', { ascending: false }),
+      supabase.from('requirements').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
+      supabase.from('risks').select('*').eq('tender_id', id),
+      supabase.from('deadlines').select('*').eq('tender_id', id).order('due_at', { ascending: true }),
+      supabase.from('response_sections').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
+      supabase.from('checklist_items').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
+    ]);
+    setTender(tRes.data);
+    setDocs(dRes.data || []);
+    setRequirements(rRes.data || []);
+    setRisks(rkRes.data || []);
+    setDeadlines(dlRes.data || []);
+    setSections(sRes.data || []);
+    setChecklist(cRes.data || []);
+    setLoading(false);
+  }, [id]);
 
   useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleRetryProcessing = async () => {
     if (!id) return;
-    const load = async () => {
-      const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes] = await Promise.all([
-        supabase.from('tenders').select('*').eq('id', id).single(),
-        supabase.from('tender_documents').select('*').eq('tender_id', id).order('created_at', { ascending: false }),
-        supabase.from('requirements').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
-        supabase.from('risks').select('*').eq('tender_id', id),
-        supabase.from('deadlines').select('*').eq('tender_id', id).order('due_at', { ascending: true }),
-        supabase.from('response_sections').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
-        supabase.from('checklist_items').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
-      ]);
-      setTender(tRes.data);
-      setDocs(dRes.data || []);
-      setRequirements(rRes.data || []);
-      setRisks(rkRes.data || []);
-      setDeadlines(dlRes.data || []);
-      setSections(sRes.data || []);
-      setChecklist(cRes.data || []);
-      setLoading(false);
-    };
-    load();
-  }, [id]);
+    setRetrying(true);
+    try {
+      const { error } = await supabase.functions.invoke('process-tender', {
+        body: { tender_id: id },
+      });
+      if (error) throw error;
+      toast({ title: t('tender.analysisReady') });
+      await loadData();
+    } catch (err: any) {
+      toast({ title: t('workspace.processingFailed'), description: err.message, variant: 'destructive' });
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const handleSaveDraft = async (sectionId: string, text: string) => {
     setSavingSection(sectionId);
@@ -141,7 +160,9 @@ export default function TenderWorkspace() {
   const completedChecklist = checklist.filter(c => c.status === 'done').length;
   const mandatoryReqs = requirements.filter(r => r.mandatory).length;
   const pendingDocs = docs.filter(d => d.parse_status === 'pending' || d.parse_status === 'processing').length;
-  const allDocsParsed = docs.length > 0 && pendingDocs === 0;
+  const failedDocs = docs.filter(d => d.parse_status === 'failed').length;
+  const allDocsParsed = docs.length > 0 && pendingDocs === 0 && failedDocs === 0;
+  const isProcessing = tender.status === 'new' || tender.status === 'analyzing' || pendingDocs > 0;
 
   return (
     <div className="animate-fade-in">
@@ -215,14 +236,32 @@ export default function TenderWorkspace() {
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* Processing status banner */}
-            {pendingDocs > 0 && (
+            {isProcessing && (
               <div className="glass-card p-4 border-warning/30 bg-warning/5 flex items-start gap-3">
                 <Loader2 className="h-5 w-5 text-warning animate-spin shrink-0 mt-0.5" />
-                <div>
+                <div className="flex-1">
                   <p className="text-sm font-medium">{t('workspace.processingStatus')}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{t('workspace.processingHint')}</p>
-                  <p className="text-xs text-warning mt-1">{pendingDocs} / {docs.length} {t('workspace.parseStatus.pending').toLowerCase()}</p>
+                  {docs.length > 0 && <p className="text-xs text-warning mt-1">{pendingDocs} / {docs.length} {t('workspace.parseStatus.pending').toLowerCase()}</p>}
                 </div>
+                <Button size="sm" variant="ghost" onClick={loadData} className="shrink-0">
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            )}
+
+            {/* Failed docs banner */}
+            {failedDocs > 0 && !isProcessing && (
+              <div className="glass-card p-4 border-destructive/30 bg-destructive/5 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">{t('workspace.processingFailed')}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t('workspace.processingFailedHint')}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={handleRetryProcessing} disabled={retrying} className="shrink-0">
+                  {retrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                  <span className="ml-1.5">{t('workspace.retryProcessing')}</span>
+                </Button>
               </div>
             )}
 

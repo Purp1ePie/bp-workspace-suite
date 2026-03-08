@@ -573,6 +573,10 @@ export type Database = {
       }
       current_organization_id: { Args: never; Returns: string }
       current_profile_is_admin: { Args: never; Returns: boolean }
+      seed_tender_defaults_for_tender: {
+        Args: { _tender_id: string }
+        Returns: undefined
+      }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
     }
