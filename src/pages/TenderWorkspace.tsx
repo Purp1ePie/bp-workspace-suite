@@ -236,14 +236,32 @@ export default function TenderWorkspace() {
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* Processing status banner */}
-            {pendingDocs > 0 && (
+            {isProcessing && (
               <div className="glass-card p-4 border-warning/30 bg-warning/5 flex items-start gap-3">
                 <Loader2 className="h-5 w-5 text-warning animate-spin shrink-0 mt-0.5" />
-                <div>
+                <div className="flex-1">
                   <p className="text-sm font-medium">{t('workspace.processingStatus')}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{t('workspace.processingHint')}</p>
-                  <p className="text-xs text-warning mt-1">{pendingDocs} / {docs.length} {t('workspace.parseStatus.pending').toLowerCase()}</p>
+                  {docs.length > 0 && <p className="text-xs text-warning mt-1">{pendingDocs} / {docs.length} {t('workspace.parseStatus.pending').toLowerCase()}</p>}
                 </div>
+                <Button size="sm" variant="ghost" onClick={loadData} className="shrink-0">
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            )}
+
+            {/* Failed docs banner */}
+            {failedDocs > 0 && !isProcessing && (
+              <div className="glass-card p-4 border-destructive/30 bg-destructive/5 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">{t('workspace.processingFailed')}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t('workspace.processingFailedHint')}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={handleRetryProcessing} disabled={retrying} className="shrink-0">
+                  {retrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                  <span className="ml-1.5">{t('workspace.retryProcessing')}</span>
+                </Button>
               </div>
             )}
 
