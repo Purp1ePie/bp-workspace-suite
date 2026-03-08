@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { BookOpen, Upload, Search, X, FileText, Tag, Loader2, Database } from 'lucide-react';
+import { BookOpen, Upload, Search, X, FileText, Loader2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
 import type { Tables } from '@/integrations/supabase/types';
@@ -75,7 +75,8 @@ export default function CompanyMemory() {
 
       let storagePath: string | null = null;
       if (file) {
-        const path = `${orgId}/${crypto.randomUUID()}_${file.name}`;
+        // Use structured path: org_id/asset_type/uuid_filename
+        const path = `${orgId}/${assetType}/${crypto.randomUUID()}_${file.name}`;
         const { error: upErr } = await supabase.storage.from('knowledge-assets').upload(path, file);
         if (upErr) throw upErr;
         storagePath = path;
