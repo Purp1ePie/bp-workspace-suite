@@ -77,6 +77,7 @@ export default function TenderWorkspace() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [savingSection, setSavingSection] = useState<string | null>(null);
+  const [reprocessing, setReprocessing] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!id) return;
