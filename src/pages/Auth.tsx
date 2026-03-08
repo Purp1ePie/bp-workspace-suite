@@ -63,8 +63,8 @@ export default function Auth() {
           <LanguageSwitcher />
         </div>
         <div className="max-w-md">
-          <h1 className="text-4xl font-bold font-heading tracking-tight mb-4">
-            <span className="text-gradient">BidPilot</span>
+          <h1 className="text-4xl mb-4">
+            <BidPilotLogo className="text-4xl" />
           </h1>
           <p className="text-lg text-muted-foreground leading-relaxed">
             {t('auth.subtitle')}
