@@ -12,7 +12,57 @@ serve(async (req) => {
   }
 
   try {
+    console.log("process-tender invoked");
+
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      console.error("Missing Authorization header");
+      return new Response(
+        JSON.stringify({ error: "Missing Authorization header" }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const token = authHeader.replace("Bearer ", "");
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const publishableKey = Deno.env.get("SB_PUBLISHABLE_KEY")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    // Client used only to validate the caller and apply RLS
+    const authClient = createClient(supabaseUrl, publishableKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+    });
+
+    // Admin client used only after authorization succeeds
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+    // Validate JWT
+    const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(token);
+
+    if (claimsError || !claimsData?.claims?.sub) {
+      console.error("Invalid JWT", claimsError);
+      return new Response(
+        JSON.stringify({ error: "Invalid JWT", details: claimsError }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const userId = String(claimsData.claims.sub);
+    console.log("Authenticated user:", userId);
+
     const { tender_id } = await req.json();
+    console.log("process-tender payload:", { tender_id });
 
     if (!tender_id) {
       return new Response(
@@ -24,19 +74,35 @@ serve(async (req) => {
       );
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    // Read the user's profile through RLS-aware client
+    const { data: profile, error: profileError } = await authClient
+      .from("profiles")
+      .select("id, organization_id")
+      .eq("id", userId)
+      .single();
 
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+    if (profileError || !profile?.organization_id) {
+      console.error("Profile not found or no organization", profileError);
+      return new Response(
+        JSON.stringify({ error: "Profile not found or no organization", details: profileError }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
 
-    // 1. Load tender
-    const { data: tender, error: tenderError } = await supabase
+    console.log("Caller organization:", profile.organization_id);
+
+    // Load tender through admin client
+    const { data: tender, error: tenderError } = await adminClient
       .from("tenders")
       .select("id, organization_id, title, status")
       .eq("id", tender_id)
       .single();
 
     if (tenderError || !tender) {
+      console.error("Tender not found", tenderError);
       return new Response(
         JSON.stringify({ error: "Tender not found", details: tenderError }),
         {
@@ -46,19 +112,32 @@ serve(async (req) => {
       );
     }
 
-    // 2. Mark tender as analyzing
-    await supabase
+    // Enforce same-organization access
+    if (tender.organization_id !== profile.organization_id) {
+      console.error("Forbidden: tender belongs to different organization");
+      return new Response(
+        JSON.stringify({ error: "Forbidden" }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    console.log("Tender loaded:", tender);
+
+    await adminClient
       .from("tenders")
       .update({ status: "analyzing" })
       .eq("id", tender_id);
 
-    // 3. Load tender documents
-    const { data: documents, error: docsError } = await supabase
+    const { data: documents, error: docsError } = await adminClient
       .from("tender_documents")
       .select("id, file_name, parse_status")
       .eq("tender_id", tender_id);
 
     if (docsError) {
+      console.error("Could not load tender documents", docsError);
       return new Response(
         JSON.stringify({ error: "Could not load tender documents", details: docsError }),
         {
@@ -68,8 +147,10 @@ serve(async (req) => {
       );
     }
 
+    console.log("Found documents:", documents?.length ?? 0);
+
     if (!documents || documents.length === 0) {
-      await supabase
+      await adminClient
         .from("tenders")
         .update({ status: "ready_for_review" })
         .eq("id", tender_id);
@@ -89,17 +170,15 @@ serve(async (req) => {
 
     const documentIds = documents.map((doc) => doc.id);
 
-    // 4. Mark docs as processing
-    await supabase
+    await adminClient
       .from("tender_documents")
       .update({ parse_status: "processing" })
       .in("id", documentIds);
 
-    // 5. Simulate parsing for now
     for (const doc of documents) {
       const placeholderText = `Parsed placeholder text for ${doc.file_name}. This is the first version of BidPilot document processing.`;
 
-      await supabase
+      await adminClient
         .from("tender_documents")
         .update({
           parse_status: "parsed",
@@ -108,25 +187,23 @@ serve(async (req) => {
         .eq("id", doc.id);
     }
 
-    // 6. Avoid duplicate inserts
-    const { count: existingRequirements } = await supabase
+    const { count: existingRequirements } = await adminClient
       .from("requirements")
       .select("*", { count: "exact", head: true })
       .eq("tender_id", tender_id);
 
-    const { count: existingDeadlines } = await supabase
+    const { count: existingDeadlines } = await adminClient
       .from("deadlines")
       .select("*", { count: "exact", head: true })
       .eq("tender_id", tender_id);
 
-    const { count: existingRisks } = await supabase
+    const { count: existingRisks } = await adminClient
       .from("risks")
       .select("*", { count: "exact", head: true })
       .eq("tender_id", tender_id);
 
-    // 7. Insert sample requirements
     if (!existingRequirements || existingRequirements === 0) {
-      await supabase.from("requirements").insert([
+      await adminClient.from("requirements").insert([
         {
           tender_id,
           organization_id: tender.organization_id,
@@ -151,12 +228,11 @@ serve(async (req) => {
       ]);
     }
 
-    // 8. Insert sample deadline
     if (!existingDeadlines || existingDeadlines === 0) {
       const dueAt = new Date();
       dueAt.setDate(dueAt.getDate() + 7);
 
-      await supabase.from("deadlines").insert([
+      await adminClient.from("deadlines").insert([
         {
           tender_id,
           organization_id: tender.organization_id,
@@ -167,9 +243,8 @@ serve(async (req) => {
       ]);
     }
 
-    // 9. Insert sample risk
     if (!existingRisks || existingRisks === 0) {
-      await supabase.from("risks").insert([
+      await adminClient.from("risks").insert([
         {
           tender_id,
           organization_id: tender.organization_id,
@@ -180,8 +255,7 @@ serve(async (req) => {
       ]);
     }
 
-    // 10. Mark tender ready for review
-    await supabase
+    await adminClient
       .from("tenders")
       .update({ status: "ready_for_review" })
       .eq("id", tender_id);
