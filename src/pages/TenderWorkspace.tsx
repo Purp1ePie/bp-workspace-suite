@@ -77,6 +77,7 @@ export default function TenderWorkspace() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [savingSection, setSavingSection] = useState<string | null>(null);
+  const [reprocessing, setReprocessing] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -146,6 +147,30 @@ export default function TenderWorkspace() {
       toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
     } else {
       setMatches(prev => prev.map(m => m.id === matchId ? { ...m, status } : m));
+    }
+  };
+
+  const handleReprocessDocuments = async () => {
+    if (!id) return;
+    setReprocessing(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        toast({ title: t('common.error'), description: 'No active session. Please sign in again.', variant: 'destructive' });
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke('process-tender', {
+        body: { tender_id: id },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (error) throw error;
+      toast({ title: 'Documents reprocessed', description: 'Tender documents have been re-analyzed.' });
+      await loadData();
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message || 'Failed to reprocess documents', variant: 'destructive' });
+    } finally {
+      setReprocessing(false);
     }
   };
 
@@ -389,12 +414,18 @@ export default function TenderWorkspace() {
           ) : (
             <div className="space-y-4">
               {/* Document stats bar */}
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span>{docs.length} {t('workspace.documents').toLowerCase()}</span>
-                <span className="w-px h-3 bg-border" />
-                <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-success" />{parsedDocs} parsed</span>
-                {pendingDocs > 0 && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-warning animate-spin" />{pendingDocs} processing</span>}
-                {failedDocs > 0 && <span className="flex items-center gap-1"><XCircle className="h-3 w-3 text-destructive" />{failedDocs} failed</span>}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <span>{docs.length} {t('workspace.documents').toLowerCase()}</span>
+                  <span className="w-px h-3 bg-border" />
+                  <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-success" />{parsedDocs} parsed</span>
+                  {pendingDocs > 0 && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-warning animate-spin" />{pendingDocs} processing</span>}
+                  {failedDocs > 0 && <span className="flex items-center gap-1"><XCircle className="h-3 w-3 text-destructive" />{failedDocs} failed</span>}
+                </div>
+                <Button size="sm" variant="outline" onClick={handleReprocessDocuments} disabled={reprocessing}>
+                  {reprocessing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                  Reprocess Documents
+                </Button>
               </div>
 
               <div className="space-y-2">

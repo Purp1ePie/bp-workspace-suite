@@ -538,6 +538,7 @@ export type Database = {
           file_type: string | null
           id: string
           organization_id: string
+          parse_error: string | null
           parse_status: string
           parsed_text: string | null
           storage_path: string
@@ -550,6 +551,7 @@ export type Database = {
           file_type?: string | null
           id?: string
           organization_id: string
+          parse_error?: string | null
           parse_status?: string
           parsed_text?: string | null
           storage_path: string
@@ -562,6 +564,7 @@ export type Database = {
           file_type?: string | null
           id?: string
           organization_id?: string
+          parse_error?: string | null
           parse_status?: string
           parsed_text?: string | null
           storage_path?: string
