@@ -161,7 +161,43 @@ export default function NewTender() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  if (uploadState === 'success') {
+  if (flowState === 'processing') {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 animate-fade-in">
+        <Loader2 className="h-10 w-10 text-primary animate-spin mb-4" />
+        <h2 className="text-xl font-bold font-heading">{t('tender.processingTender')}</h2>
+        <p className="text-sm text-muted-foreground mt-1">{t('tender.processingDescription')}</p>
+      </div>
+    );
+  }
+
+  if (flowState === 'failed') {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 animate-fade-in">
+        <div className="rounded-full bg-destructive/20 p-4 mb-4">
+          <AlertCircle className="h-10 w-10 text-destructive" />
+        </div>
+        <h2 className="text-xl font-bold font-heading">{t('common.error')}</h2>
+        <p className="text-sm text-muted-foreground mt-1 max-w-md text-center">{processingError}</p>
+        {createdTenderId && (
+          <div className="flex gap-3 mt-4">
+            <Button size="sm" variant="outline" onClick={() => invokeProcessTender(createdTenderId)}>
+              <RefreshCw className="h-4 w-4 mr-1.5" />
+              {t('workspace.retryProcessing')}
+            </Button>
+            <Link to={`/tenders/${createdTenderId}`}>
+              <Button size="sm" variant="secondary">
+                {t('tender.goToWorkspace')}
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            </Link>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (flowState === 'ready') {
     return (
       <div className="flex flex-col items-center justify-center h-96 animate-fade-in">
         <div className="rounded-full bg-success/20 p-4 mb-4">
@@ -169,23 +205,6 @@ export default function NewTender() {
         </div>
         <h2 className="text-xl font-bold font-heading">{t('tender.created')}</h2>
         <p className="text-sm text-muted-foreground mt-1">{t('tender.createdDescription')}</p>
-
-        {files.length > 0 && (
-          <div className="mt-4 glass-card p-4 w-full max-w-sm">
-            <p className="text-xs text-muted-foreground mb-2">
-              {uploadedCount}/{files.length} {t('tender.filesSelected')}
-            </p>
-            {files.map((file, idx) => (
-              <div key={idx} className="flex items-center gap-2 py-1 text-xs">
-                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="truncate flex-1">{file.name}</span>
-                <span className="text-warning">
-                  {t('workspace.parseStatus.pending')}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
 
         {createdTenderId && (
           <Link to={`/tenders/${createdTenderId}`}>
