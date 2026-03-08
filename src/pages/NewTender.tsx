@@ -13,13 +13,17 @@ const TENDER_TYPES = ['public', 'private'] as const;
 
 type FlowState = 'idle' | 'uploading' | 'processing' | 'ready' | 'failed';
 
-async function callProcessTender(tenderId: string): Promise<any> {
+async function getAccessToken(): Promise<string> {
   const { data: sessionData } = await supabase.auth.getSession();
   const accessToken = sessionData?.session?.access_token;
   if (!accessToken) throw new Error('No active session. Please sign in again.');
+  return accessToken;
+}
 
+async function callEdgeFunction(functionName: string, body: Record<string, unknown>): Promise<any> {
+  const accessToken = await getAccessToken();
   const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-tender`,
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${functionName}`,
     {
       method: 'POST',
       headers: {
@@ -27,13 +31,12 @@ async function callProcessTender(tenderId: string): Promise<any> {
         Authorization: `Bearer ${accessToken}`,
         apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
       },
-      body: JSON.stringify({ tender_id: tenderId }),
+      body: JSON.stringify(body),
     }
   );
-
-  const body = await response.json();
-  if (!response.ok) throw new Error(body?.error || `Function failed: ${response.status}`);
-  return body;
+  const result = await response.json();
+  if (!response.ok) throw new Error(result?.error || `${functionName} failed: ${response.status}`);
+  return result;
 }
 
 export default function NewTender() {
@@ -86,8 +89,19 @@ export default function NewTender() {
     setProcessingError(null);
     console.log('[BidPilot] Invoking process-tender for:', tenderId);
     try {
-      const result = await callProcessTender(tenderId);
+      const result = await callEdgeFunction('process-tender', { tender_id: tenderId });
       console.log('[BidPilot] process-tender result:', result);
+
+      // Chain: call match-knowledge-assets
+      console.log('[BidPilot] Invoking match-knowledge-assets for:', tenderId);
+      try {
+        const matchResult = await callEdgeFunction('match-knowledge-assets', { tender_id: tenderId });
+        console.log('[BidPilot] match-knowledge-assets result:', matchResult);
+      } catch (matchErr: any) {
+        console.warn('[BidPilot] match-knowledge-assets failed (non-blocking):', matchErr.message);
+        toast({ title: 'Knowledge matching skipped', description: matchErr.message, variant: 'destructive' });
+      }
+
       setFlowState('ready');
       toast({ title: t('tender.created'), description: t('tender.createdDescription') });
     } catch (err: any) {
