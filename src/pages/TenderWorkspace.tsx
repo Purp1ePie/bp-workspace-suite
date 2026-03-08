@@ -150,6 +150,30 @@ export default function TenderWorkspace() {
     }
   };
 
+  const handleReprocessDocuments = async () => {
+    if (!id) return;
+    setReprocessing(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        toast({ title: t('common.error'), description: 'No active session. Please sign in again.', variant: 'destructive' });
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke('process-tender', {
+        body: { tender_id: id },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (error) throw error;
+      toast({ title: 'Documents reprocessed', description: 'Tender documents have been re-analyzed.' });
+      await loadData();
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message || 'Failed to reprocess documents', variant: 'destructive' });
+    } finally {
+      setReprocessing(false);
+    }
+  };
+
   const [matchingInProgress, setMatchingInProgress] = useState(false);
   const handleRetryMatching = async () => {
     if (!id) return;
