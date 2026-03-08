@@ -10,8 +10,11 @@ import AppLayout from "@/components/AppLayout";
 import Auth from "@/pages/Auth";
 import Dashboard from "@/pages/Dashboard";
 import NewTender from "@/pages/NewTender";
+import Tenders from "@/pages/Tenders";
 import TenderWorkspace from "@/pages/TenderWorkspace";
 import CompanyMemory from "@/pages/CompanyMemory";
+import Checklist from "@/pages/Checklist";
+import Settings from "@/pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -35,8 +38,11 @@ const App = () => (
               >
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/tenders/new" element={<NewTender />} />
+                <Route path="/tenders" element={<Tenders />} />
                 <Route path="/tenders/:id" element={<TenderWorkspace />} />
                 <Route path="/memory" element={<CompanyMemory />} />
+                <Route path="/checklist" element={<Checklist />} />
+                <Route path="/settings" element={<Settings />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>
