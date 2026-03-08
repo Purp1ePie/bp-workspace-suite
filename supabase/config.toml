@@ -7,7 +7,7 @@ import_map = "./functions/process-tender/deno.json"
 entrypoint = "./functions/process-tender/index.ts"
 [functions.match-knowledge-assets]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/match-knowledge-assets/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
