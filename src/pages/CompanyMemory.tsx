@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { BookOpen, Upload, Search, X, FileText, Loader2, Database, Tag, FolderOpen, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
+import { BookOpen, Upload, Search, X, FileText, Loader2, Database, Tag, FolderOpen, CheckCircle2, AlertCircle, Clock, RotateCw } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
@@ -68,6 +68,7 @@ export default function CompanyMemory() {
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [reprocessingIds, setReprocessingIds] = useState<Set<string>>(new Set());
 
   const loadAssets = async () => {
     const { data } = await supabase.from('knowledge_assets').select('*').order('created_at', { ascending: false });
@@ -76,6 +77,32 @@ export default function CompanyMemory() {
   };
 
   useEffect(() => { loadAssets(); }, []);
+
+  const handleReprocess = async (assetId: string) => {
+    setReprocessingIds(prev => new Set(prev).add(assetId));
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        toast({ title: 'Auth error', description: 'No active session. Please sign in again.', variant: 'destructive' });
+        return;
+      }
+      const { error: fnError } = await supabase.functions.invoke('process-knowledge-assets', {
+        body: { knowledge_asset_id: assetId },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (fnError) {
+        toast({ title: 'Reprocessing failed', description: fnError.message || 'Could not process asset.', variant: 'destructive' });
+      } else {
+        toast({ title: 'Reprocessing started' });
+      }
+      await loadAssets();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setReprocessingIds(prev => { const next = new Set(prev); next.delete(assetId); return next; });
+    }
+  };
 
   const filtered = assets.filter(a => {
     const matchesSearch = !search ||
@@ -323,6 +350,21 @@ export default function CompanyMemory() {
                   <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                   <span className="line-clamp-2">{asset.parse_error}</span>
                 </div>
+              )}
+              {(asset.parse_status === 'pending' || asset.parse_status === 'failed') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-2 w-full text-xs h-7"
+                  disabled={reprocessingIds.has(asset.id)}
+                  onClick={() => handleReprocess(asset.id)}
+                >
+                  {reprocessingIds.has(asset.id) ? (
+                    <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Processing…</>
+                  ) : (
+                    <><RotateCw className="h-3 w-3 mr-1.5" />Reprocess</>
+                  )}
+                </Button>
               )}
               {asset.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-3">
