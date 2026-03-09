@@ -260,6 +260,49 @@ export default function TenderWorkspace() {
     }
   };
 
+  const [exportingDocx, setExportingDocx] = useState(false);
+
+  const handleExportDocx = async () => {
+    if (!id) return;
+    setExportingDocx(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active session');
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/export-response-doc`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ tender_id: id }),
+        }
+      );
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error || `Export failed: ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeTitle = (tender?.title || 'Response').replace(/[^a-zA-Z0-9\u00C0-\u024F\s_-]/g, '').replace(/\s+/g, '_').slice(0, 80);
+      a.download = `${safeTitle}_Response.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: 'DOCX exported', description: `Downloaded ${safeTitle}_Response.docx` });
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setExportingDocx(false);
+    }
+  };
+
   const handleRetryMatching = async () => {
     if (!id) return;
     setMatchingInProgress(true);
@@ -934,6 +977,12 @@ export default function TenderWorkspace() {
                     <Button size="sm" variant="outline" onClick={handleExportFilledExcel} disabled={exportingExcel}>
                       {exportingExcel ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />}
                       Download Filled Excel
+                    </Button>
+                  )}
+                  {draftedSections > 0 && (
+                    <Button size="sm" variant="outline" onClick={handleExportDocx} disabled={exportingDocx}>
+                      {exportingDocx ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                      Download DOCX
                     </Button>
                   )}
                 </div>

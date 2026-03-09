@@ -28,3 +28,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/export-filled-excel/deno.json"
 entrypoint = "./functions/export-filled-excel/index.ts"
+
+[functions.export-response-doc]
+enabled = true
+verify_jwt = false
+import_map = "./functions/export-response-doc/deno.json"
+entrypoint = "./functions/export-response-doc/index.ts"
