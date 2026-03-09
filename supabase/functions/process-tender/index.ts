@@ -9,8 +9,8 @@ const corsHeaders = {
 };
 
 const OPENAI_MODEL = "gpt-4o";
-const MAX_EXTRACTION_CHARS = 40000;
-const OPENAI_TIMEOUT_MS = 50000;
+const MAX_EXTRACTION_CHARS = 60000;
+const OPENAI_TIMEOUT_MS = 90000;
 
 interface ExtractedRequirement {
   category: string;
@@ -31,7 +31,15 @@ interface ExtractedRisk {
   description: string;
 }
 
+interface TenderMetadata {
+  title: string | null;
+  issuer: string | null;
+  description: string | null;
+  submission_deadline: string | null;
+}
+
 interface ExtractionResult {
+  tender_metadata: TenderMetadata;
   requirements: ExtractedRequirement[];
   deadlines: ExtractedDeadline[];
   risks: ExtractedRisk[];
@@ -50,22 +58,31 @@ async function extractWithOpenAI(
   const langMap: Record<string, string> = { de: "German", en: "English", fr: "French", it: "Italian" };
   const outputLang = langMap[outputLanguage || ""] || "German";
 
-  const systemPrompt = `You are an expert procurement analyst specializing in public and private tender documents. Your task is to extract structured data from tender document text.
+  const systemPrompt = `You are an expert procurement analyst specializing in public and private tender documents (especially Swiss public procurement / Ausschreibungen). Your task is to extract structured data from tender document text.
 
 The tender documents may be written in any language. CRITICAL: You MUST write ALL text fields (titles, descriptions, requirement texts) in ${outputLang}. Even if the document is in a different language, translate and write your output in ${outputLang}.
 
 Extract the following:
 
+## Tender Metadata
+Extract basic information about the tender:
+- "title": The official title or name of the tender/project (null if not found)
+- "issuer": The organization issuing the tender / Auftraggeber (null if not found)
+- "description": A brief summary of what the tender is about, 1-3 sentences in ${outputLang} (null if not found)
+- "submission_deadline": The submission deadline as ISO 8601 datetime (null if not found). Use the FINAL submission/Eingabefrist date, not question deadlines.
+
 ## Requirements
-Identify all requirements the bidder must fulfill. For each requirement:
-- "category": One of "technical", "commercial", "reference", "administrative", "legal"
-  - technical: technical specifications, service descriptions, implementation requirements, SLAs, quality standards
+Identify ALL requirements the bidder must fulfill. Be thorough — extract EVERY requirement mentioned, including eligibility criteria (Eignungskriterien), technical specifications, and administrative requirements. For each:
+- "category": One of "technical", "commercial", "eligibility", "administrative", "legal"
+  - technical: technical specifications, service descriptions, implementation requirements, SLAs, quality standards, architecture, infrastructure
   - commercial: pricing format, payment terms, financial conditions, insurance requirements
-  - reference: customer references, project references, case studies required
-  - administrative: forms to fill, documents to submit, formatting requirements, certifications to provide
-  - legal: legal compliance, NDAs, contract terms, regulatory requirements
-- "text": The requirement described clearly and concisely in ${outputLang} (one sentence, max 200 characters).
-- "mandatory": true if the document uses words like "must", "shall", "required", "mandatory", "muss", "zwingend", "obligatoire", "obbligatorio", or similar. false if optional/recommended.
+  - eligibility: bidder qualifications, company requirements, certifications needed, reference projects required, financial standing, team qualifications, Eignungskriterien, sustainability requirements
+  - administrative: forms to fill, documents to submit, formatting requirements, project methodology, project management
+  - legal: legal compliance, NDAs, contract terms, regulatory requirements, data protection, privacy
+- "text": The requirement described clearly and concisely in ${outputLang} (one sentence, max 250 characters). Each requirement should be a DISTINCT item — do not merge multiple requirements into one.
+- "mandatory": true if the document uses words like "must", "shall", "required", "mandatory", "muss", "zwingend", "obligatoire", "obbligatorio", or similar. false if optional/recommended ("soll", "should", "empfohlen").
+
+IMPORTANT: Extract EVERY individual requirement. If a document has 30 requirements, return 30 items. Do NOT summarize or merge requirements. Include eligibility criteria (Eignungskriterien) as separate requirement items with category "eligibility".
 
 ## Deadlines
 Identify all dates and deadlines mentioned. For each:
@@ -82,6 +99,7 @@ Identify potential risks or concerns a bidder should be aware of. For each:
 
 Return ONLY a valid JSON object with this exact structure (no markdown, no explanation, no wrapping):
 {
+  "tender_metadata": {"title": "...", "issuer": "...", "description": "...", "submission_deadline": "..."},
   "requirements": [...],
   "deadlines": [...],
   "risks": [...]
@@ -108,7 +126,7 @@ If you cannot find any items for a category, return an empty array for that cate
           { role: "user", content: userPrompt },
         ],
         temperature: 0.1,
-        max_tokens: 4096,
+        max_tokens: 12000,
         response_format: { type: "json_object" },
       }),
       signal: controller.signal,
@@ -132,9 +150,17 @@ If you cannot find any items for a category, return an empty array for that cate
 
     const parsed = JSON.parse(content) as ExtractionResult;
 
+    if (!parsed.tender_metadata) parsed.tender_metadata = { title: null, issuer: null, description: null, submission_deadline: null };
     if (!Array.isArray(parsed.requirements)) parsed.requirements = [];
     if (!Array.isArray(parsed.deadlines)) parsed.deadlines = [];
     if (!Array.isArray(parsed.risks)) parsed.risks = [];
+
+    // Validate category values
+    const validCategories = new Set(["technical", "commercial", "eligibility", "administrative", "legal"]);
+    parsed.requirements = parsed.requirements.map((r) => ({
+      ...r,
+      category: validCategories.has(r.category) ? r.category : "technical",
+    }));
 
     parsed.deadlines = parsed.deadlines.filter((d) => {
       try {
@@ -668,6 +694,42 @@ serve(async (req) => {
           const { error: riskError } = await adminClient.from("risks").insert(riskRows);
           if (riskError) console.error("Failed to insert risks:", riskError);
           else console.log("Inserted", riskRows.length, "risks");
+        }
+
+        // Auto-fill tender metadata from extraction
+        const meta = extraction.tender_metadata;
+        if (meta) {
+          const updates: Record<string, unknown> = {};
+          // Only fill fields that are currently empty/default on the tender
+          if (meta.title && (!tender.title || tender.title === "Untitled Tender" || tender.title === "Neue Ausschreibung")) {
+            updates.title = meta.title;
+          }
+          if (meta.issuer) {
+            // Always update issuer since it's typically null
+            updates.issuer = meta.issuer;
+          }
+          if (meta.description) {
+            updates.description = meta.description;
+          }
+          if (meta.submission_deadline) {
+            try {
+              const dl = new Date(meta.submission_deadline);
+              if (!isNaN(dl.getTime())) {
+                updates.deadline = dl.toISOString();
+              }
+            } catch {
+              console.warn("Invalid submission_deadline from extraction:", meta.submission_deadline);
+            }
+          }
+          if (Object.keys(updates).length > 0) {
+            console.log("Auto-filling tender metadata:", updates);
+            const { error: metaError } = await adminClient
+              .from("tenders")
+              .update(updates)
+              .eq("id", tender_id);
+            if (metaError) console.error("Failed to update tender metadata:", metaError);
+            else console.log("Tender metadata updated successfully");
+          }
         }
       } catch (aiError) {
         console.error("AI extraction failed, continuing without extraction:", aiError);

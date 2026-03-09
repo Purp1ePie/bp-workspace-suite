@@ -98,12 +98,17 @@ Superficial similarities do NOT count:
 - Both mentioning "project management" is NOT enough
 - The document must contain information that could actually help answer or fulfill the requirement
 
-Scoring:
+Scoring — be precise, use the FULL range, do NOT cluster scores:
 - 0-20: Completely irrelevant (different domain/industry)
-- 21-49: Superficially similar but not applicable
-- 50-69: Partially relevant (same domain, some applicable content)
-- 70-85: Highly relevant (directly applicable knowledge)
-- 86-100: Perfect match (directly addresses the requirement)
+- 21-39: Marginally related (same broad industry but different topic)
+- 40-49: Superficially similar but not directly applicable
+- 50-59: Somewhat relevant (overlapping domain, but only partially applicable)
+- 60-69: Clearly relevant (same domain, meaningful applicable content)
+- 70-79: Highly relevant (directly applicable knowledge and experience)
+- 80-89: Very strong match (document specifically covers this requirement area)
+- 90-100: Perfect match (document directly addresses and answers the requirement)
+
+DIFFERENTIATE scores: If one document covers the exact technology/service asked for and another only tangentially relates, there should be a significant score gap (20+ points). Never give all documents the same score.
 
 IMPORTANT: Write the "reason" field in ${outputLanguage}. Keep it to one clear sentence.
 
