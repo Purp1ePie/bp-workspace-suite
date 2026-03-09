@@ -337,14 +337,18 @@ serve(async (req: Request) => {
       }
     }
 
-    let totalScore = 0;
+    let totalMatchedScore = 0;
     let coveredCount = 0;
     for (const req of requirements) {
       const bestScore = matchesByReq[req.id] || 0;
-      totalScore += bestScore;
-      if (bestScore >= GOOD_MATCH_THRESHOLD) coveredCount++;
+      if (bestScore >= GOOD_MATCH_THRESHOLD) {
+        totalMatchedScore += bestScore;
+        coveredCount++;
+      }
     }
-    const fitScore = Math.round(totalScore / requirements.length);
+    // Fit score = average quality of matched requirements (not penalized by unmatched ones)
+    // Coverage percent separately shows how many requirements have matches
+    const fitScore = coveredCount > 0 ? Math.round(totalMatchedScore / coveredCount) : 0;
     const coveragePercent = Math.round(
       (coveredCount / requirements.length) * 100,
     );

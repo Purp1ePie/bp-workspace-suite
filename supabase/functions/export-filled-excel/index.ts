@@ -728,6 +728,49 @@ serve(async (req: Request) => {
       );
     }
 
+    // ── Validate mappings: never overwrite existing content ──────────
+
+    const PLACEHOLDER_PATTERNS = ["bitte", "todo", "enter", "ausfüllen", "eingeben", "hier", "[", "..."];
+    function isPlaceholder(val: string): boolean {
+      const lower = val.toLowerCase().trim();
+      return lower.length < 40 && PLACEHOLDER_PATTERNS.some(p => lower.includes(p));
+    }
+
+    // Build lookup of cells that already have content
+    const existingContent = new Map<string, string>();
+    for (const sheet of sheets) {
+      for (const cell of sheet.cells) {
+        if (cell.value && cell.value.trim().length > 0) {
+          existingContent.set(`${sheet.sheetName}!${cell.ref}`, cell.value);
+        }
+      }
+    }
+
+    const originalCount = mappingResult.mappings.length;
+    mappingResult.mappings = mappingResult.mappings.filter(m => {
+      const key = `${m.sheet}!${m.cell}`;
+      const existing = existingContent.get(key);
+      if (existing && !isPlaceholder(existing)) {
+        console.warn(`[export-filled-excel] BLOCKED overwrite of ${key} (existing: "${existing.substring(0, 60)}...")`);
+        return false;
+      }
+      return true;
+    });
+
+    console.log(`[export-filled-excel] Validated mappings: ${mappingResult.mappings.length} safe / ${originalCount} total (${originalCount - mappingResult.mappings.length} blocked)`);
+
+    if (mappingResult.mappings.length === 0) {
+      return new Response(
+        JSON.stringify({
+          error: "All mapped cells already have content. Could not fill any new cells.",
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     // ── Modify worksheet XML ─────────────────────────────────────────
 
     const modifiedFiles: Record<string, Uint8Array> = {};

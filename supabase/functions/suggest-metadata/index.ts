@@ -239,21 +239,27 @@ serve(async (req) => {
     const body = await req.json();
     const { mode } = body;
 
+    console.log(`suggest-metadata mode=${mode}`);
+
     if (mode === "knowledge") {
       // Single file → knowledge asset metadata
       const { file_name, file_content_base64 } = body;
       if (!file_name || !file_content_base64) {
+        console.error("Knowledge mode: missing file_name or file_content_base64");
         return new Response(JSON.stringify({ error: "Missing file_name or file_content_base64" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
+      console.log(`Knowledge mode: processing ${file_name}, base64 length: ${file_content_base64.length}`);
       const bytes = base64ToUint8Array(file_content_base64);
       const ext = getExtension(file_name);
+      console.log(`Knowledge mode: extension=${ext}, bytes=${bytes.length}`);
       const { text, error: parseError } = await readTextFromFile(bytes, ext);
 
       if (!text) {
+        console.error(`Knowledge mode: text extraction FAILED for ${file_name} (${ext}): ${parseError}`);
         return new Response(JSON.stringify({ success: false, error: parseError || "Could not extract text" }), {
           status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -293,17 +299,27 @@ serve(async (req) => {
       const filesToProcess = files.slice(0, 3);
       const textParts: string[] = [];
 
+      console.log(`Tender mode: processing ${filesToProcess.length} files`);
+
       for (const f of filesToProcess) {
-        if (!f.file_name || !f.file_content_base64) continue;
+        if (!f.file_name || !f.file_content_base64) {
+          console.warn(`Tender mode: skipping file with missing name or content`);
+          continue;
+        }
         const bytes = base64ToUint8Array(f.file_content_base64);
         const ext = getExtension(f.file_name);
-        const { text } = await readTextFromFile(bytes, ext);
+        console.log(`Tender mode: parsing ${f.file_name} (${ext}), ${bytes.length} bytes`);
+        const { text, error: parseError } = await readTextFromFile(bytes, ext);
         if (text) {
           textParts.push(`--- File: ${f.file_name} ---\n${text}`);
+          console.log(`Tender mode: extracted ${text.length} chars from ${f.file_name}`);
+        } else {
+          console.error(`Tender mode: FAILED to parse ${f.file_name} (${ext}): ${parseError}`);
         }
       }
 
       if (textParts.length === 0) {
+        console.error("Tender mode: no text extracted from any file");
         return new Response(JSON.stringify({ success: false, error: "Could not extract text from any file" }), {
           status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
