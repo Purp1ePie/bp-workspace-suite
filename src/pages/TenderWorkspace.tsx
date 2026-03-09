@@ -11,7 +11,7 @@ import {
   ArrowLeft, FileText, AlertTriangle, CheckSquare, BookOpen, Edit, List,
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
-  Check, X as XIcon, Sparkles, FileSpreadsheet, Download,
+  Check, X as XIcon, Sparkles, FileSpreadsheet, Download, HelpCircle,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
@@ -26,8 +26,9 @@ type ResponseSection = Tables<'response_sections'>;
 type ChecklistItem = Tables<'checklist_items'>;
 type RequirementMatch = Tables<'requirement_matches'>;
 type KnowledgeAsset = Tables<'knowledge_assets'>;
+type ClarificationQuestion = Tables<'clarification_questions'>;
 
-const TABS = ['overview', 'documents', 'requirements', 'risks', 'knowledge', 'draft', 'checklist'] as const;
+const TABS = ['overview', 'documents', 'requirements', 'risks', 'knowledge', 'draft', 'clarifications', 'checklist'] as const;
 type Tab = typeof TABS[number];
 
 const tabIcons: Record<Tab, any> = {
@@ -37,6 +38,7 @@ const tabIcons: Record<Tab, any> = {
   risks: AlertTriangle,
   knowledge: BookOpen,
   draft: Edit,
+  clarifications: HelpCircle,
   checklist: CheckSquare,
 };
 
@@ -73,6 +75,7 @@ export default function TenderWorkspace() {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [matches, setMatches] = useState<RequirementMatch[]>([]);
   const [knowledgeAssets, setKnowledgeAssets] = useState<KnowledgeAsset[]>([]);
+  const [clarifications, setClarifications] = useState<ClarificationQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -81,7 +84,7 @@ export default function TenderWorkspace() {
 
   const loadData = useCallback(async () => {
     if (!id) return;
-    const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes, mRes] = await Promise.all([
+    const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes, mRes, clRes] = await Promise.all([
       supabase.from('tenders').select('*').eq('id', id).single(),
       supabase.from('tender_documents').select('*').eq('tender_id', id).order('created_at', { ascending: false }),
       supabase.from('requirements').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
@@ -90,6 +93,7 @@ export default function TenderWorkspace() {
       supabase.from('response_sections').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
       supabase.from('checklist_items').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
       supabase.from('requirement_matches').select('*').eq('tender_id', id).order('confidence_score', { ascending: false }),
+      supabase.from('clarification_questions').select('*').eq('tender_id', id).order('created_at', { ascending: true }),
     ]);
     setTender(tRes.data);
     setDocs(dRes.data || []);
@@ -99,6 +103,7 @@ export default function TenderWorkspace() {
     setSections(sRes.data || []);
     setChecklist(cRes.data || []);
     setMatches(mRes.data || []);
+    setClarifications(clRes.data || []);
 
     // Fetch knowledge assets if we have matches
     const matchData = mRes.data || [];
@@ -303,6 +308,110 @@ export default function TenderWorkspace() {
     }
   };
 
+  const [generatingClarifications, setGeneratingClarifications] = useState(false);
+  const [exportingClarifications, setExportingClarifications] = useState(false);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  const [editingQuestionText, setEditingQuestionText] = useState('');
+
+  const handleGenerateClarifications = async () => {
+    if (!id) return;
+    setGeneratingClarifications(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active session');
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-clarification-questions`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ tender_id: id }),
+        }
+      );
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || `Generation failed: ${response.status}`);
+      toast({
+        title: t('workspace.clarificationsGenerated'),
+        description: `${result.count} ${t('workspace.questionsGenerated')}`,
+      });
+      await loadData();
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setGeneratingClarifications(false);
+    }
+  };
+
+  const handleExportClarificationsDocx = async () => {
+    if (!id) return;
+    setExportingClarifications(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('No active session');
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/export-clarifications-doc`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ tender_id: id }),
+        }
+      );
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error || `Export failed: ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeTitle = (tender?.title || 'Clarifications').replace(/[^a-zA-Z0-9\u00C0-\u024F\s_-]/g, '').replace(/\s+/g, '_').slice(0, 80);
+      a.download = `${safeTitle}_Clarifications.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: 'DOCX exported', description: `Downloaded ${safeTitle}_Clarifications.docx` });
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setExportingClarifications(false);
+    }
+  };
+
+  const handleSaveQuestion = async (questionId: string, newText: string) => {
+    const { error } = await supabase.from('clarification_questions').update({ question_text: newText }).eq('id', questionId);
+    if (error) {
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
+    } else {
+      setClarifications(prev => prev.map(q => q.id === questionId ? { ...q, question_text: newText } : q));
+      toast({ title: t('workspace.questionSaved') });
+    }
+    setEditingQuestionId(null);
+  };
+
+  const handleDeleteQuestion = async (questionId: string) => {
+    const { error } = await supabase.from('clarification_questions').delete().eq('id', questionId);
+    if (!error) {
+      setClarifications(prev => prev.filter(q => q.id !== questionId));
+    }
+  };
+
+  const handleUpdateQuestionStatus = async (questionId: string, status: string) => {
+    const { error } = await supabase.from('clarification_questions').update({ status }).eq('id', questionId);
+    if (!error) {
+      setClarifications(prev => prev.map(q => q.id === questionId ? { ...q, status } : q));
+    }
+  };
+
   const handleRetryMatching = async () => {
     if (!id) return;
     setMatchingInProgress(true);
@@ -352,6 +461,7 @@ export default function TenderWorkspace() {
     risks: t('workspace.risks'),
     knowledge: t('workspace.knowledge'),
     draft: t('workspace.draft'),
+    clarifications: t('workspace.clarifications'),
     checklist: t('workspace.checklist'),
   };
 
@@ -361,6 +471,7 @@ export default function TenderWorkspace() {
     risks: risks.length + deadlines.length,
     knowledge: matches.length,
     draft: sections.length,
+    clarifications: clarifications.length,
     checklist: checklist.length,
   };
 
@@ -998,6 +1109,122 @@ export default function TenderWorkspace() {
                   t={t}
                 />
               ))}
+            </div>
+          )
+        )}
+
+        {/* CLARIFICATIONS */}
+        {activeTab === 'clarifications' && (
+          clarifications.length === 0 ? (
+            <EmptyState
+              icon={HelpCircle}
+              title={t('workspace.noClarifications')}
+              description={requirements.length > 0
+                ? 'Use AI to generate clarification questions based on gaps and ambiguities in the tender.'
+                : 'Process the tender first to extract requirements.'}
+              action={requirements.length > 0 ? (
+                <Button size="sm" variant="outline" onClick={handleGenerateClarifications} disabled={generatingClarifications}>
+                  {generatingClarifications ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                  Generate Clarification Questions
+                </Button>
+              ) : undefined}
+            />
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <span>{clarifications.length} questions</span>
+                  <span className="w-px h-3 bg-border" />
+                  <span>{clarifications.filter(q => q.status === 'draft').length} draft</span>
+                  <span>{clarifications.filter(q => q.status === 'sent').length} sent</span>
+                  <span>{clarifications.filter(q => q.status === 'answered').length} answered</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={handleGenerateClarifications} disabled={generatingClarifications}>
+                    {generatingClarifications ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                    Re-generate
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={handleExportClarificationsDocx} disabled={exportingClarifications}>
+                    {exportingClarifications ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                    Download DOCX
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {clarifications.map((q, idx) => {
+                  const statusColors: Record<string, string> = {
+                    draft: 'bg-muted text-muted-foreground',
+                    sent: 'bg-warning/15 text-warning',
+                    answered: 'bg-success/15 text-success',
+                  };
+                  const isEditing = editingQuestionId === q.id;
+                  return (
+                    <div key={q.id} className="glass-card px-5 py-4 hover:border-primary/20 transition-colors">
+                      <div className="flex items-start gap-3">
+                        <span className="flex items-center justify-center h-6 w-6 rounded bg-muted text-[10px] font-bold text-muted-foreground shrink-0 mt-0.5">
+                          {idx + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          {isEditing ? (
+                            <div className="space-y-2">
+                              <textarea
+                                value={editingQuestionText}
+                                onChange={e => setEditingQuestionText(e.target.value)}
+                                className="w-full min-h-[80px] bg-background border border-border rounded-lg p-3 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+                              />
+                              <div className="flex items-center gap-2 justify-end">
+                                <Button size="sm" variant="ghost" onClick={() => setEditingQuestionId(null)}>
+                                  Cancel
+                                </Button>
+                                <Button size="sm" onClick={() => handleSaveQuestion(q.id, editingQuestionText)}>
+                                  Save
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-sm leading-relaxed">{q.question_text}</p>
+                              {q.rationale && (
+                                <p className="text-xs text-muted-foreground mt-1.5 italic">{q.rationale}</p>
+                              )}
+                              <div className="flex items-center gap-2 mt-2.5">
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${statusColors[q.status] || 'bg-muted text-muted-foreground'}`}>
+                                  {t(`status.${q.status}` as any) || q.status}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {q.status === 'draft' && (
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
+                              onClick={() => handleUpdateQuestionStatus(q.id, 'sent')}>
+                              Mark Sent
+                            </Button>
+                          )}
+                          {q.status === 'sent' && (
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
+                              onClick={() => handleUpdateQuestionStatus(q.id, 'answered')}>
+                              Mark Answered
+                            </Button>
+                          )}
+                          {!isEditing && (
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0"
+                              onClick={() => { setEditingQuestionId(q.id); setEditingQuestionText(q.question_text); }}>
+                              <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10"
+                            onClick={() => handleDeleteQuestion(q.id)}>
+                            <XIcon className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )
         )}

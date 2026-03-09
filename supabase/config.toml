@@ -34,3 +34,14 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/export-response-doc/deno.json"
 entrypoint = "./functions/export-response-doc/index.ts"
+
+[functions.generate-clarification-questions]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/generate-clarification-questions/index.ts"
+
+[functions.export-clarifications-doc]
+enabled = true
+verify_jwt = false
+import_map = "./functions/export-clarifications-doc/deno.json"
+entrypoint = "./functions/export-clarifications-doc/index.ts"

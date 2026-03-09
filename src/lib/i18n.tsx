@@ -138,6 +138,14 @@ const translations = {
   'workspace.allParsed': { de: 'Alle Dokumente verarbeitet', en: 'All documents processed' },
   'workspace.savingDraft': { de: 'Entwurf wird gespeichert...', en: 'Saving draft...' },
   'workspace.draftSaved': { de: 'Entwurf gespeichert', en: 'Draft saved' },
+  'workspace.clarifications': { de: 'Klarstellungen', en: 'Clarifications' },
+  'workspace.noClarifications': { de: 'Noch keine Klarstellungsfragen', en: 'No clarification questions yet' },
+  'workspace.clarificationsGenerated': { de: 'Klarstellungsfragen generiert', en: 'Clarification questions generated' },
+  'workspace.questionsGenerated': { de: 'Fragen generiert', en: 'questions generated' },
+  'workspace.questionSaved': { de: 'Frage gespeichert', en: 'Question saved' },
+  'status.draft': { de: 'Entwurf', en: 'Draft' },
+  'status.sent': { de: 'Gesendet', en: 'Sent' },
+  'status.answered': { de: 'Beantwortet', en: 'Answered' },
 
   // Parse status
   'workspace.parseStatus.pending': { de: 'Ausstehend', en: 'Pending' },
