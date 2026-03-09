@@ -279,6 +279,7 @@ const translations = {
   'common.empty': { de: 'Keine Daten', en: 'No data' },
   'common.error': { de: 'Ein Fehler ist aufgetreten', en: 'An error occurred' },
   'common.success': { de: 'Erfolgreich', en: 'Success' },
+  'common.close': { de: 'Schliessen', en: 'Close' },
   'common.saving': { de: 'Wird gespeichert...', en: 'Saving...' },
   'common.of': { de: 'von', en: 'of' },
 
@@ -373,6 +374,15 @@ const translations = {
   'workspace.noPreview': { de: 'Kein Text verfügbar', en: 'No text available' },
   'workspace.acceptMatch': { de: 'Akzeptieren', en: 'Accept' },
   'workspace.rejectMatch': { de: 'Ablehnen', en: 'Reject' },
+  'workspace.aiSummary': { de: 'KI-Zusammenfassung', en: 'AI Summary' },
+  'workspace.loadingSummary': { de: 'Zusammenfassung wird erstellt...', en: 'Generating summary...' },
+  'workspace.showMore': { de: 'Mehr anzeigen', en: 'Show more' },
+  'workspace.showLess': { de: 'Weniger anzeigen', en: 'Show less' },
+  'workspace.openDocument': { de: 'Dokument öffnen', en: 'Open document' },
+  'workspace.documentViewer': { de: 'Dokument-Ansicht', en: 'Document Viewer' },
+  'workspace.downloadFile': { de: 'Datei herunterladen', en: 'Download file' },
+  'workspace.fullText': { de: 'Volltext', en: 'Full Text' },
+  'workspace.relevance': { de: 'Relevanz', en: 'Relevance' },
 
   // Process stepper & next action
   'process.title': { de: 'Bearbeitungsprozess', en: 'Workflow' },

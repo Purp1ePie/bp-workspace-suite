@@ -13,7 +13,7 @@ import {
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
   Check, X as XIcon, Sparkles, FileSpreadsheet, Download, HelpCircle, Trash2,
-  UserCircle2, Filter, MessageSquare, Send, Play,
+  UserCircle2, Filter, MessageSquare, Send, Play, Eye, ChevronDown, ChevronUp, ExternalLink,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -378,6 +378,27 @@ export default function TenderWorkspace() {
     }
   };
 
+  const handleLoadSummary = async (matchId: string, assetId: string, requirementText: string) => {
+    if (matchSummaries[matchId]) return; // Already cached
+    setLoadingSummary(matchId);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      const resp = await supabase.functions.invoke('summarize-match', {
+        body: { knowledge_asset_id: assetId, requirement_text: requirementText, language },
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      });
+      if (resp.error) throw new Error(resp.error.message);
+      const summary = resp.data?.summary || '';
+      setMatchSummaries(prev => ({ ...prev, [matchId]: summary }));
+    } catch (err: any) {
+      console.error('Summary error:', err);
+      setMatchSummaries(prev => ({ ...prev, [matchId]: '' }));
+    } finally {
+      setLoadingSummary(null);
+    }
+  };
+
   const handleReprocessDocuments = async () => {
     if (!id) return;
     setReprocessing(true);
@@ -540,6 +561,10 @@ export default function TenderWorkspace() {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDue, setNewTaskDue] = useState('');
   const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null);
+  const [matchSummaries, setMatchSummaries] = useState<Record<string, string>>({});
+  const [loadingSummary, setLoadingSummary] = useState<string | null>(null);
+  const [expandedTextMatchId, setExpandedTextMatchId] = useState<string | null>(null);
+  const [viewerAsset, setViewerAsset] = useState<KnowledgeAsset | null>(null);
 
   const handleDeleteDocument = async () => {
     if (!deleteDocTarget) return;
@@ -1681,7 +1706,13 @@ export default function TenderWorkspace() {
                               <div key={match.id}>
                                 <div
                                   className={`px-5 py-3.5 flex items-center gap-4 cursor-pointer transition-colors hover:bg-accent/30 ${match.status === 'rejected' ? 'opacity-50' : ''}`}
-                                  onClick={() => setExpandedMatchId(isExpanded ? null : match.id)}
+                                  onClick={() => {
+                                    const newExpanded = isExpanded ? null : match.id;
+                                    setExpandedMatchId(newExpanded);
+                                    if (newExpanded && asset) {
+                                      handleLoadSummary(match.id, match.knowledge_asset_id, req.text);
+                                    }
+                                  }}
                                 >
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
@@ -1739,6 +1770,28 @@ export default function TenderWorkspace() {
                                 {isExpanded && (
                                   <div className="px-5 pb-4 pt-0 border-t border-border/30 bg-muted/20">
                                     <div className="pt-3 space-y-3">
+                                      {/* AI Summary */}
+                                      <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                                          <Sparkles className="h-3 w-3" />
+                                          {t('workspace.aiSummary')}
+                                        </p>
+                                        {loadingSummary === match.id ? (
+                                          <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background/50 rounded p-3 border border-border/30">
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                                            <span>{t('workspace.loadingSummary')}</span>
+                                          </div>
+                                        ) : matchSummaries[match.id] ? (
+                                          <p className="text-xs text-foreground/80 leading-relaxed bg-primary/5 rounded p-3 border border-primary/20">
+                                            {matchSummaries[match.id]}
+                                          </p>
+                                        ) : matchSummaries[match.id] === '' ? (
+                                          <p className="text-xs text-muted-foreground/50 italic bg-background/50 rounded p-3 border border-border/30">
+                                            {t('workspace.noPreview')}
+                                          </p>
+                                        ) : null}
+                                      </div>
+
                                       {/* Match reasons */}
                                       {reasons.length > 0 && (
                                         <div>
@@ -1754,14 +1807,34 @@ export default function TenderWorkspace() {
                                         </div>
                                       )}
 
-                                      {/* Text preview */}
+                                      {/* Text preview with expand/collapse */}
                                       <div>
                                         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t('workspace.textPreview')}</p>
-                                        {textPreview ? (
-                                          <p className="text-xs text-muted-foreground leading-relaxed bg-background/50 rounded p-2.5 border border-border/30">
-                                            {textPreview}
-                                          </p>
-                                        ) : (
+                                        {asset?.extracted_text ? (() => {
+                                          const isTextExpanded = expandedTextMatchId === match.id;
+                                          const fullText = asset.extracted_text || '';
+                                          const shortText = fullText.slice(0, 200).trim() + (fullText.length > 200 ? '...' : '');
+                                          const longText = fullText.slice(0, 1500).trim() + (fullText.length > 1500 ? '...' : '');
+                                          return (
+                                            <div>
+                                              <p className="text-xs text-muted-foreground leading-relaxed bg-background/50 rounded p-2.5 border border-border/30 whitespace-pre-wrap">
+                                                {isTextExpanded ? longText : shortText}
+                                              </p>
+                                              {fullText.length > 200 && (
+                                                <button
+                                                  onClick={(e) => { e.stopPropagation(); setExpandedTextMatchId(isTextExpanded ? null : match.id); }}
+                                                  className="mt-1.5 text-xs text-primary hover:text-primary/80 flex items-center gap-1 transition-colors"
+                                                >
+                                                  {isTextExpanded ? (
+                                                    <><ChevronUp className="h-3 w-3" /> {t('workspace.showLess')}</>
+                                                  ) : (
+                                                    <><ChevronDown className="h-3 w-3" /> {t('workspace.showMore')}</>
+                                                  )}
+                                                </button>
+                                              )}
+                                            </div>
+                                          );
+                                        })() : (
                                           <p className="text-xs text-muted-foreground/50 italic">{t('workspace.noPreview')}</p>
                                         )}
                                       </div>
@@ -1775,6 +1848,22 @@ export default function TenderWorkspace() {
                                               {tag}
                                             </span>
                                           ))}
+                                        </div>
+                                      )}
+
+                                      {/* Document link */}
+                                      {asset && (
+                                        <div className="flex items-center gap-3 pt-1 border-t border-border/20">
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); setViewerAsset(asset); }}
+                                            className="text-xs text-primary hover:text-primary/80 flex items-center gap-1.5 transition-colors font-medium"
+                                          >
+                                            <Eye className="h-3.5 w-3.5" />
+                                            {t('workspace.openDocument')}
+                                          </button>
+                                          {fileExt && (
+                                            <span className="text-[10px] text-muted-foreground/60">{fileExt}</span>
+                                          )}
                                         </div>
                                       )}
                                     </div>
@@ -2254,6 +2343,75 @@ export default function TenderWorkspace() {
               {deletingDoc && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
               {t('workspace.deleteDocument')}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Document Viewer Modal */}
+      <AlertDialog open={!!viewerAsset} onOpenChange={(open) => { if (!open) setViewerAsset(null); }}>
+        <AlertDialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <AlertDialogHeader className="shrink-0">
+            <AlertDialogTitle className="flex items-center gap-3">
+              <FileText className="h-5 w-5 text-primary shrink-0" />
+              <span className="truncate">{viewerAsset?.title || '—'}</span>
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="flex items-center gap-2 flex-wrap">
+                {viewerAsset?.asset_type && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium capitalize">
+                    {viewerAsset.asset_type.replace('_', ' ')}
+                  </span>
+                )}
+                {viewerAsset?.storage_path && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium uppercase">
+                    {viewerAsset.storage_path.split('.').pop()}
+                  </span>
+                )}
+                {viewerAsset?.tags && viewerAsset.tags.length > 0 && viewerAsset.tags.map((tag, i) => (
+                  <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="flex-1 overflow-y-auto min-h-0 my-3">
+            {viewerAsset?.extracted_text ? (
+              <div className="bg-muted/30 rounded-lg p-4 border border-border/40">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                  {t('workspace.fullText')}
+                </p>
+                <div className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap font-mono text-[13px]">
+                  {viewerAsset.extracted_text}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-12 text-sm text-muted-foreground">
+                {t('workspace.noPreview')}
+              </div>
+            )}
+          </div>
+
+          <AlertDialogFooter className="shrink-0 flex items-center gap-2">
+            {viewerAsset?.storage_path && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mr-auto"
+                onClick={async () => {
+                  if (!viewerAsset?.storage_path) return;
+                  const { data } = await supabase.storage.from('knowledge-assets').createSignedUrl(viewerAsset.storage_path, 300);
+                  if (data?.signedUrl) {
+                    window.open(data.signedUrl, '_blank');
+                  }
+                }}
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                {t('workspace.downloadFile')}
+              </Button>
+            )}
+            <AlertDialogCancel>{t('common.close')}</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
