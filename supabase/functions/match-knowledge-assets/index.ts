@@ -6,17 +6,43 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const STOP_WORDS = new Set([
+  "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
+  "her", "was", "one", "our", "out", "has", "his", "how", "its", "may",
+  "new", "now", "old", "see", "way", "who", "did", "get", "let", "say",
+  "she", "too", "use", "mit", "und", "der", "die", "das", "ein", "eine",
+  "den", "dem", "des", "ist", "sind", "von", "fur", "auf", "bei", "nach",
+  "uber", "aus", "als", "auch", "oder", "wie", "dass", "wird", "werden",
+  "soll", "muss", "kann", "alle", "sich", "noch", "nur", "zum", "zur",
+]);
+
+function stemSimple(word: string): string {
+  if (word.length <= 4) return word;
+  return word
+    .replace(/ies$/, "y")
+    .replace(/tion$/, "t")
+    .replace(/(ing|ment|ness|able|ible|ment)$/, "")
+    .replace(/s$/, "")
+    .replace(/ed$/, "")
+    .replace(/er$/, "")
+    .replace(/en$/, "");
+}
+
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9äöüàéèêëîïôùûç\s]/gi, " ")
+    .replace(/[^a-z0-9\s]/gi, " ")
     .split(/\s+/)
-    .filter((w) => w.length > 2);
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+}
+
+function stemmedTokens(text: string): Set<string> {
+  return new Set(tokenize(text).map(stemSimple));
 }
 
 function overlapScore(a: string, b: string): number {
-  const aTokens = new Set(tokenize(a));
-  const bTokens = new Set(tokenize(b));
+  const aTokens = stemmedTokens(a);
+  const bTokens = stemmedTokens(b);
   let overlap = 0;
 
   for (const token of aTokens) {
@@ -26,6 +52,14 @@ function overlapScore(a: string, b: string): number {
   return overlap;
 }
 
+function categoryBonus(category: string | null, assetType: string): number {
+  if (!category) return 0;
+  if (category === "reference" && assetType === "reference") return 15;
+  if (category === "technical" && (assetType === "service_description" || assetType === "past_answer")) return 10;
+  if (category === "commercial" && assetType === "template") return 10;
+  return 0;
+}
+
 function assetTypeBonus(requirementText: string, assetType: string): number {
   const text = requirementText.toLowerCase();
 
@@ -33,6 +67,7 @@ function assetTypeBonus(requirementText: string, assetType: string): number {
   if ((text.includes("zert") || text.includes("certif")) && assetType === "certificate") return 15;
   if ((text.includes("security") || text.includes("sicherheit") || text.includes("policy")) && assetType === "policy") return 15;
   if ((text.includes("service") || text.includes("leistung") || text.includes("implementation")) && assetType === "service_description") return 15;
+  if ((text.includes("cv") || text.includes("lebenslauf") || text.includes("team") || text.includes("qualification")) && assetType === "cv") return 15;
 
   return 0;
 }
@@ -235,19 +270,28 @@ serve(async (req) => {
       const scored = assets.map((asset) => {
         const titleOverlap = overlapScore(requirement.text, asset.title || "");
         const textOverlap = overlapScore(requirement.text, asset.extracted_text || "");
-        const bonus = assetTypeBonus(requirement.text, asset.asset_type);
+        const typeBonus = assetTypeBonus(requirement.text, asset.asset_type);
+        const catBonus = categoryBonus(requirement.category, asset.asset_type);
+        const hasExtractedText = asset.extracted_text && asset.extracted_text.length > 0;
 
-        const score = Math.min(100, titleOverlap * 10 + textOverlap * 4 + bonus);
+        const score = Math.min(100,
+          titleOverlap * 12 +
+          textOverlap * 6 +
+          Math.max(typeBonus, catBonus) +
+          (hasExtractedText ? 5 : 0)
+        );
 
         return {
           asset,
           score,
-          reason: `title_overlap=${titleOverlap}, text_overlap=${textOverlap}, asset_type_bonus=${bonus}`,
+          reason: `title=${titleOverlap}, text=${textOverlap}, type_bonus=${typeBonus}, cat_bonus=${catBonus}, has_text=${hasExtractedText}`,
         };
       });
 
+      console.log("Scores for requirement:", requirement.text.slice(0, 60), scored.map((s) => ({ title: s.asset.title, score: s.score, reason: s.reason })));
+
       const topMatches = scored
-        .filter((m) => m.score >= 30)
+        .filter((m) => m.score >= 15)
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
 
