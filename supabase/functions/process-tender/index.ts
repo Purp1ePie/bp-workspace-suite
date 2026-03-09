@@ -40,15 +40,19 @@ interface ExtractionResult {
 async function extractWithOpenAI(
   combinedText: string,
   tenderTitle: string,
+  outputLanguage?: string,
 ): Promise<ExtractionResult> {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY secret is not configured");
   }
 
+  const langMap: Record<string, string> = { de: "German", en: "English", fr: "French", it: "Italian" };
+  const outputLang = langMap[outputLanguage || ""] || "German";
+
   const systemPrompt = `You are an expert procurement analyst specializing in public and private tender documents. Your task is to extract structured data from tender document text.
 
-The tender documents may be written in German, English, French, or Italian. Regardless of the document language, you MUST return all extracted text fields in the SAME language as the original document. Do not translate.
+The tender documents may be written in any language. CRITICAL: You MUST write ALL text fields (titles, descriptions, requirement texts) in ${outputLang}. Even if the document is in a different language, translate and write your output in ${outputLang}.
 
 Extract the following:
 
@@ -60,21 +64,21 @@ Identify all requirements the bidder must fulfill. For each requirement:
   - reference: customer references, project references, case studies required
   - administrative: forms to fill, documents to submit, formatting requirements, certifications to provide
   - legal: legal compliance, NDAs, contract terms, regulatory requirements
-- "text": The requirement described clearly and concisely (one sentence, max 200 characters). Keep the original document language.
+- "text": The requirement described clearly and concisely in ${outputLang} (one sentence, max 200 characters).
 - "mandatory": true if the document uses words like "must", "shall", "required", "mandatory", "muss", "zwingend", "obligatoire", "obbligatorio", or similar. false if optional/recommended.
 
 ## Deadlines
 Identify all dates and deadlines mentioned. For each:
 - "deadline_type": One of "submission", "clarification", "site_visit", "q_and_a", "award", "contract_start", "other"
 - "due_at": ISO 8601 datetime string (e.g. "2025-06-15T17:00:00Z"). If only a date is given with no time, use T23:59:00Z. If the year is missing, assume the current or next upcoming year.
-- "description": Brief description of what this deadline is for, in the original document language.
+- "description": Brief description of what this deadline is for, in ${outputLang}.
 
 ## Risks
 Identify potential risks or concerns a bidder should be aware of. For each:
-- "title": A short, specific, human-readable title (max 60 chars) describing THIS particular risk. Write it in the original document language. Be specific, e.g. "Einreichungsfrist nur 10 Arbeitstage" or "Konventionalstrafe von 5% bei Verzug" — NOT generic labels.
+- "title": A short, specific, human-readable title (max 60 chars) describing THIS particular risk in ${outputLang}. Be specific, e.g. "Einreichungsfrist nur 10 Arbeitstage" or "Konventionalstrafe von 5% bei Verzug" — NOT generic labels.
 - "risk_type": One of "missing_information", "tight_deadline", "unusual_requirement", "high_penalty", "scope_ambiguity", "resource_intensive", "legal_risk", "financial_risk"
 - "severity": One of "low", "medium", "high", "critical"
-- "description": A clear, actionable description of the risk and what the bidder should consider, in the original document language (2-3 sentences).
+- "description": A clear, actionable description of the risk and what the bidder should consider, in ${outputLang} (2-3 sentences).
 
 Return ONLY a valid JSON object with this exact structure (no markdown, no explanation, no wrapping):
 {
@@ -437,7 +441,7 @@ serve(async (req) => {
 
     const { data: tender, error: tenderError } = await adminClient
       .from("tenders")
-      .select("id, organization_id, title, status")
+      .select("id, organization_id, title, status, language")
       .eq("id", tender_id)
       .single();
 
@@ -618,7 +622,7 @@ serve(async (req) => {
 
       try {
         console.log("Calling OpenAI for extraction");
-        const extraction = await extractWithOpenAI(combinedText, tender.title || "Untitled Tender");
+        const extraction = await extractWithOpenAI(combinedText, tender.title || "Untitled Tender", tender.language || "de");
 
         console.log("Extraction results:", {
           requirements: extraction.requirements.length,
