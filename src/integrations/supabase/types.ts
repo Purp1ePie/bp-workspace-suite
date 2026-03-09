@@ -586,6 +586,7 @@ export type Database = {
           bid_decision: string | null
           created_at: string
           deadline: string | null
+          description: string | null
           fit_score: number | null
           id: string
           issuer: string | null
@@ -603,6 +604,7 @@ export type Database = {
           bid_decision?: string | null
           created_at?: string
           deadline?: string | null
+          description?: string | null
           fit_score?: number | null
           id?: string
           issuer?: string | null
@@ -620,6 +622,7 @@ export type Database = {
           bid_decision?: string | null
           created_at?: string
           deadline?: string | null
+          description?: string | null
           fit_score?: number | null
           id?: string
           issuer?: string | null

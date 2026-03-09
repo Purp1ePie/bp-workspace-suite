@@ -7,17 +7,27 @@ import { useToast } from '@/hooks/use-toast';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Compass, FolderPlus, ExternalLink, Loader2, Calendar, Building2 } from 'lucide-react';
+import { Search, Compass, FolderPlus, ExternalLink, Loader2, Calendar, Building2, MapPin } from 'lucide-react';
 import { format } from 'date-fns';
+
+function pickTranslation(t: any, preferredLang = 'de'): string {
+  if (!t) return '';
+  if (typeof t === 'string') return t;
+  return t[preferredLang] || t.de || t.fr || t.en || t.it || Object.values(t).find(Boolean) || '';
+}
 
 interface SimapResult {
   project_id: string;
   title: string;
+  description: string;
   issuer: string;
   publication_date: string | null;
   deadline: string | null;
   project_type: string | null;
   process_type: string | null;
+  canton: string | null;
+  cpv_codes: string[];
+  language: string;
   simap_url: string;
 }
 
@@ -74,15 +84,35 @@ export default function SIMAPDiscovery() {
       const { data: orgData } = await supabase.rpc('current_organization_id');
       if (!orgData) throw new Error('No organization found');
 
+      // Fetch rich project data from SIMAP
+      let richData: any = null;
+      try {
+        const fetchResult = await callEdgeFunction('fetch-simap', {
+          simap_project_id: item.project_id,
+          simap_url: item.simap_url,
+        });
+        richData = fetchResult.data;
+      } catch {
+        // Fall back to search result data
+      }
+
+      const description = richData?.raw_data
+        ? (pickTranslation(richData.raw_data.description) || pickTranslation(richData.raw_data.shortDescription) || item.description)
+        : item.description;
+
       const { data: tender, error } = await supabase
         .from('tenders')
         .insert({
-          title: item.title || `SIMAP ${item.project_id}`,
-          issuer: item.issuer || null,
+          title: richData?.title || item.title || `SIMAP ${item.project_id}`,
+          issuer: richData?.issuer || item.issuer || null,
+          description: description || null,
           source_type: 'simap',
           tender_type: 'public',
-          status: 'active',
-          deadline: item.deadline ? new Date(item.deadline).toISOString() : null,
+          status: 'ready_for_review',
+          language: richData?.language || item.language || 'de',
+          deadline: (richData?.deadline || item.deadline)
+            ? new Date(richData?.deadline || item.deadline).toISOString()
+            : null,
           organization_id: orgData,
           simap_url: item.simap_url,
           simap_project_id: item.project_id,
@@ -157,7 +187,17 @@ export default function SIMAPDiscovery() {
                     <div className="flex items-center gap-1.5 mt-1">
                       <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
                       <span className="text-xs text-muted-foreground truncate">{item.issuer}</span>
+                      {item.canton && (
+                        <>
+                          <span className="text-muted-foreground">·</span>
+                          <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <span className="text-xs text-muted-foreground">{item.canton}</span>
+                        </>
+                      )}
                     </div>
+                  )}
+                  {item.description && (
+                    <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2">{item.description}</p>
                   )}
                   <div className="flex items-center gap-4 mt-2">
                     {item.publication_date && (

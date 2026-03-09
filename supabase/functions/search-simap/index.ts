@@ -118,6 +118,7 @@ serve(async (req: Request) => {
 
     const results = projects.map((p: any) => {
       const title = pickTranslation(p.title);
+      const description = pickTranslation(p.description) || pickTranslation(p.shortDescription);
       const issuer = pickTranslation(p.procOfficeName) || pickTranslation(p.orderAddress?.name);
       const projectId = p.id || p.projectId;
 
@@ -127,14 +128,32 @@ serve(async (req: Request) => {
         deadline = p.lots[0]?.offerDeadline || p.lots[0]?.deadline || null;
       }
 
+      // Extract canton from orderAddress
+      const canton = p.orderAddress?.canton || null;
+
+      // Extract CPV codes
+      const cpvCodes = p.cpvCodes || p.lots?.[0]?.cpvCodes || [];
+
+      // Detect language
+      let language = "de";
+      if (p.title && typeof p.title === "object") {
+        if (p.title.fr && !p.title.de) language = "fr";
+        else if (p.title.it && !p.title.de) language = "it";
+        else if (p.title.en && !p.title.de) language = "en";
+      }
+
       return {
         project_id: projectId,
         title,
+        description,
         issuer,
         publication_date: p.publicationDate || null,
         deadline,
         project_type: p.projectType || null,
         process_type: p.processType || null,
+        canton,
+        cpv_codes: cpvCodes,
+        language,
         simap_url: `https://www.simap.ch/publications/project/${projectId}`,
       };
     });

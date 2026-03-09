@@ -543,6 +543,9 @@ export default function TenderWorkspace() {
               <span className="capitalize text-xs px-2 py-0.5 rounded bg-muted">{tender.source_type}</span>
               <span className="capitalize text-xs px-2 py-0.5 rounded bg-muted">{tender.tender_type}</span>
             </div>
+            {tender.description && (
+              <p className="text-sm text-muted-foreground mt-2 line-clamp-3">{tender.description}</p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <StatusBadge status={tender.status} />
