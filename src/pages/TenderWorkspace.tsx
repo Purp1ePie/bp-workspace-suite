@@ -9,11 +9,11 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import {
-  ArrowLeft, FileText, AlertTriangle, CheckSquare, BookOpen, Edit, List,
+  ArrowLeft, ArrowRight, FileText, AlertTriangle, CheckSquare, BookOpen, Edit, List,
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
   Check, X as XIcon, Sparkles, FileSpreadsheet, Download, HelpCircle, Trash2,
-  UserCircle2, Filter, MessageSquare, Send,
+  UserCircle2, Filter, MessageSquare, Send, Play,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -734,6 +734,142 @@ export default function TenderWorkspace() {
     ? t('workspace.recommendNoBidReason').replace('{coverage}', String(requirementsCoverage)).replace('{fit}', String(knowledgeFit)).replace('{risks}', String(highRisks))
     : t('workspace.recommendNeutralReason').replace('{coverage}', String(requirementsCoverage)).replace('{fit}', String(knowledgeFit));
 
+  // Process steps for stepper
+  const processSteps = [
+    {
+      key: 'documents',
+      icon: FileText,
+      label: t('process.documents'),
+      completed: docs.length > 0 && allDocsParsed && !isProcessing,
+      active: isProcessing || (docs.length > 0 && !allDocsParsed),
+      detail: docs.length === 0
+        ? t('process.nextUpload')
+        : isProcessing
+        ? `${parsedDocs}/${docs.length} ${t('process.docsDetail')}`
+        : `${parsedDocs} ${t('process.docsDetail')}`,
+    },
+    {
+      key: 'analysis',
+      icon: List,
+      label: t('process.analysis'),
+      completed: requirements.length > 0,
+      active: allDocsParsed && !isProcessing && requirements.length === 0,
+      detail: requirements.length > 0
+        ? `${requirements.length} ${t('process.reqsDetail')}`
+        : '',
+    },
+    {
+      key: 'matching',
+      icon: BookOpen,
+      label: t('process.matching'),
+      completed: matches.length > 0,
+      active: requirements.length > 0 && matches.length === 0,
+      detail: matches.length > 0
+        ? `${requirementsCoverage}% ${t('process.coverageDetail')}`
+        : '',
+    },
+    {
+      key: 'draft',
+      icon: Edit,
+      label: t('process.draft'),
+      completed: draftedSections > 0,
+      active: matches.length > 0 && draftedSections === 0,
+      detail: sections.length > 0
+        ? `${draftedSections}/${sections.length} ${t('process.sectionsDetail')}`
+        : '',
+    },
+    {
+      key: 'review',
+      icon: CheckSquare,
+      label: t('process.review'),
+      completed: checklistProgress === 100 && tender.bid_decision != null,
+      active: draftedSections > 0 && (checklistProgress < 100 || !tender.bid_decision),
+      detail: tender.bid_decision
+        ? tender.bid_decision === 'bid' ? t('workspace.bidDecisionBid') : t('workspace.bidDecisionNoBid')
+        : checklist.length > 0 ? `${checklistProgress}%` : '',
+    },
+  ];
+
+  // Determine the current active step index
+  const activeStepIndex = processSteps.findIndex(s => s.active);
+  const completedStepCount = processSteps.filter(s => s.completed).length;
+
+  // Next action guidance
+  const nextAction = (() => {
+    if (docs.length === 0) return {
+      key: 'upload',
+      label: t('process.nextUpload'),
+      description: t('process.nextUploadDesc'),
+      action: () => setActiveTab('documents'),
+      icon: FileText,
+      loading: false,
+      complete: false,
+    };
+    if (isProcessing) return {
+      key: 'processing',
+      label: t('process.nextProcessing'),
+      description: t('process.nextProcessingDesc'),
+      action: null,
+      icon: Loader2,
+      loading: true,
+      complete: false,
+    };
+    if (requirements.length === 0 && allDocsParsed) return {
+      key: 'reprocess',
+      label: t('workspace.retryProcessing'),
+      description: t('process.nextUploadDesc'),
+      action: () => handleReprocessDocuments(),
+      icon: RefreshCw,
+      loading: reprocessing,
+      complete: false,
+    };
+    if (matches.length === 0 && requirements.length > 0) return {
+      key: 'matching',
+      label: t('process.nextMatching'),
+      description: t('process.nextMatchingDesc'),
+      action: () => handleRetryMatching(),
+      icon: BookOpen,
+      loading: matchingInProgress,
+      complete: false,
+    };
+    if (draftedSections === 0 && requirements.length > 0) return {
+      key: 'draft',
+      label: t('process.nextDraft'),
+      description: t('process.nextDraftDesc'),
+      action: () => handleGenerateResponse(),
+      icon: Sparkles,
+      loading: generatingResponse,
+      complete: false,
+    };
+    if (checklist.length > 0 && checklistProgress < 100) return {
+      key: 'checklist',
+      label: t('process.nextChecklist'),
+      description: t('process.nextChecklistDesc'),
+      action: () => setActiveTab('checklist'),
+      icon: CheckSquare,
+      loading: false,
+      complete: false,
+    };
+    if (!tender.bid_decision) return {
+      key: 'decision',
+      label: t('process.nextDecision'),
+      description: t('process.nextDecisionDesc'),
+      action: null,
+      icon: Target,
+      loading: false,
+      complete: false,
+    };
+    return {
+      key: 'complete',
+      label: t('process.allComplete'),
+      description: t('process.allCompleteDesc'),
+      action: null,
+      icon: CheckCircle2,
+      loading: false,
+      complete: true,
+    };
+  })();
+
   return (
     <div className="animate-fade-in">
       {/* Header */}
@@ -817,15 +953,99 @@ export default function TenderWorkspace() {
         {/* OVERVIEW */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* Processing banner */}
-            {isProcessing && (
-              <div className="glass-card p-5 border-warning/30 bg-warning/5">
-                <div className="flex items-start gap-3">
-                  <Loader2 className="h-5 w-5 text-warning animate-spin shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold">{t('workspace.processingStatus')}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{t('workspace.processingHint')}</p>
-                    {docs.length > 0 && (
+            {/* Process Stepper */}
+            <div className="glass-card p-5">
+              <div className="flex items-center gap-2 mb-5">
+                <Target className="h-4 w-4 text-primary" />
+                <h3 className="font-heading font-semibold text-sm">{t('process.title')}</h3>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {completedStepCount}/{processSteps.length} {t('process.completed').toLowerCase()}
+                </span>
+              </div>
+
+              {/* Stepper visual */}
+              <div className="flex items-start gap-0">
+                {processSteps.map((step, i) => {
+                  const StepIcon = step.icon;
+                  const isCompleted = step.completed;
+                  const isActive = step.active && !step.completed;
+                  const isPending = !step.completed && !step.active;
+
+                  return (
+                    <React.Fragment key={step.key}>
+                      <div className={`flex-1 flex flex-col items-center text-center group ${
+                        isCompleted ? 'cursor-default' : isActive ? 'cursor-default' : 'cursor-default'
+                      }`}>
+                        {/* Step circle */}
+                        <div className={`relative h-10 w-10 rounded-full flex items-center justify-center transition-all duration-300 ${
+                          isCompleted
+                            ? 'bg-success text-white'
+                            : isActive
+                            ? 'bg-primary text-white ring-4 ring-primary/20'
+                            : 'bg-muted text-muted-foreground'
+                        }`}>
+                          {isCompleted ? (
+                            <Check className="h-4 w-4" />
+                          ) : isActive ? (
+                            <StepIcon className={`h-4 w-4 ${step.key === 'documents' && isProcessing ? 'animate-pulse' : ''}`} />
+                          ) : (
+                            <StepIcon className="h-4 w-4" />
+                          )}
+                          {isActive && !isProcessing && (
+                            <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-primary animate-ping" />
+                          )}
+                        </div>
+                        {/* Label */}
+                        <p className={`mt-2 text-xs font-medium leading-tight ${
+                          isCompleted ? 'text-success' : isActive ? 'text-primary' : 'text-muted-foreground'
+                        }`}>
+                          {step.label}
+                        </p>
+                        {/* Detail */}
+                        {step.detail && (
+                          <p className={`mt-0.5 text-[10px] leading-tight ${
+                            isCompleted ? 'text-success/70' : isActive ? 'text-primary/70' : 'text-muted-foreground/50'
+                          }`}>
+                            {step.detail}
+                          </p>
+                        )}
+                      </div>
+                      {/* Connector line */}
+                      {i < processSteps.length - 1 && (
+                        <div className="flex items-center pt-5 px-0 shrink-0">
+                          <div className={`w-6 lg:w-10 h-0.5 rounded transition-colors ${
+                            isCompleted ? 'bg-success' : 'bg-border'
+                          }`} />
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Next Action guidance */}
+            {!nextAction.complete ? (
+              <div className={`glass-card p-5 ${
+                nextAction.loading
+                  ? 'border-warning/30 bg-warning/5'
+                  : 'border-primary/30 bg-primary/5'
+              }`}>
+                <div className="flex items-start gap-4">
+                  <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${
+                    nextAction.loading ? 'bg-warning/15' : 'bg-primary/15'
+                  }`}>
+                    <nextAction.icon className={`h-5 w-5 ${
+                      nextAction.loading ? 'text-warning animate-spin' : 'text-primary'
+                    }`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-primary">{t('process.nextStep')}</span>
+                    </div>
+                    <p className="text-sm font-semibold mt-1">{nextAction.label}</p>
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{nextAction.description}</p>
+                    {isProcessing && docs.length > 0 && (
                       <div className="flex items-center gap-4 mt-3">
                         <div className="flex-1">
                           <Progress value={docs.length > 0 ? ((parsedDocs + failedDocs) / docs.length) * 100 : 0} className="h-1.5" />
@@ -836,18 +1056,27 @@ export default function TenderWorkspace() {
                       </div>
                     )}
                   </div>
-                  <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={refreshing} className="shrink-0">
-                    <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${refreshing ? 'animate-spin' : ''}`} />
-                    Refresh
-                  </Button>
+                  {nextAction.action && !nextAction.loading && (
+                    <Button size="sm" onClick={nextAction.action} className="shrink-0">
+                      {nextAction.label}
+                      <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                    </Button>
+                  )}
+                  {nextAction.loading && (
+                    <Button size="sm" variant="ghost" onClick={handleRefresh} disabled={refreshing} className="shrink-0">
+                      <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${refreshing ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                  )}
                 </div>
               </div>
-            )}
-
-            {allDocsParsed && !isProcessing && (
+            ) : (
               <div className="glass-card p-4 border-success/30 bg-success/5 flex items-center gap-3">
                 <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
-                <p className="text-sm font-medium text-success">{t('workspace.allParsed')}</p>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-success">{nextAction.label}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{nextAction.description}</p>
+                </div>
               </div>
             )}
 
