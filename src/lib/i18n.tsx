@@ -206,6 +206,20 @@ const translations = {
   'memory.types.past_answer': { de: 'Frühere Antwort', en: 'Past Answer' },
   'memory.totalAssets': { de: 'Total Assets', en: 'Total Assets' },
 
+  // Bulk Upload
+  'memory.dropFilesMultiple': { de: 'Dateien hier ablegen oder klicken zum Auswählen', en: 'Drop files here or click to select' },
+  'memory.bulkUploadAll': { de: 'Alle hochladen', en: 'Upload All' },
+  'memory.bulkAnalyzing': { de: 'KI analysiert...', en: 'AI analyzing...' },
+  'memory.bulkReady': { de: 'Bereit', en: 'Ready' },
+  'memory.bulkError': { de: 'Analyse fehlgeschlagen', en: 'Analysis failed' },
+  'memory.bulkUploading': { de: 'Wird hochgeladen...', en: 'Uploading...' },
+  'memory.bulkDone': { de: 'Fertig', en: 'Done' },
+  'memory.bulkSuccess': { de: 'Assets erfolgreich hochgeladen', en: 'Assets uploaded successfully' },
+  'memory.removeFile': { de: 'Datei entfernen', en: 'Remove file' },
+
+  // Tender AI Prefill
+  'tender.aiAnalyzing': { de: 'KI analysiert Ihre Dokumente...', en: 'AI analyzing your documents...' },
+
   // Checklist (standalone)
   'checklist.title': { de: 'Checkliste', en: 'Checklist' },
   'checklist.subtitle': { de: 'Alle offenen Aufgaben über alle Ausschreibungen', en: 'All open tasks across all tenders' },

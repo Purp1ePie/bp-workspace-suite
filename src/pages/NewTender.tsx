@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon, ArrowRight, AlertCircle, RefreshCw, Download } from 'lucide-react';
+import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon, ArrowRight, AlertCircle, RefreshCw, Download, Sparkles } from 'lucide-react';
 
 const SOURCE_TYPES = ['simap', 'email', 'upload', 'manual', 'portal'] as const;
 const TENDER_TYPES = ['public', 'private'] as const;
@@ -35,6 +35,7 @@ export default function NewTender() {
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [simapFetching, setSimapFetching] = useState(false);
   const [simapProjectId, setSimapProjectId] = useState<string | null>(null);
+  const [aiPrefilling, setAiPrefilling] = useState(false);
 
   const handleFetchSimap = async () => {
     if (!simapLink) return;
@@ -57,8 +58,57 @@ export default function NewTender() {
     }
   };
 
+  function arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+    return btoa(binary);
+  }
+
   const handleFiles = (newFiles: FileList | File[]) => {
-    setFiles(prev => [...prev, ...Array.from(newFiles)]);
+    const fileArray = Array.from(newFiles);
+    setFiles(prev => [...prev, ...fileArray]);
+
+    // Auto-trigger AI prefill if form fields are empty
+    if (!title && !issuer && !deadline && !aiPrefilling) {
+      triggerAiPrefill(fileArray);
+    }
+  };
+
+  const triggerAiPrefill = async (fileArray: File[]) => {
+    setAiPrefilling(true);
+    try {
+      // Limit to first 3 files, max 10MB each
+      const toAnalyze = fileArray.filter(f => f.size <= 10 * 1024 * 1024).slice(0, 3);
+      if (toAnalyze.length === 0) return;
+
+      const filesPayload = await Promise.all(
+        toAnalyze.map(async (f) => ({
+          file_content_base64: arrayBufferToBase64(await f.arrayBuffer()),
+          file_name: f.name,
+        }))
+      );
+
+      const result = await callEdgeFunction('suggest-metadata', {
+        mode: 'tender',
+        files: filesPayload,
+      });
+
+      if (result.success && result.suggestions) {
+        const s = result.suggestions;
+        if (s.title) setTitle(prev => prev || s.title);
+        if (s.issuer) setIssuer(prev => prev || s.issuer);
+        if (s.deadline) setDeadline(prev => prev || s.deadline.slice(0, 16));
+        if (s.language) setTenderLanguage(s.language);
+        if (s.tender_type) setTenderType(s.tender_type);
+      }
+    } catch (err) {
+      console.warn('AI prefill failed (non-blocking):', err);
+    } finally {
+      setAiPrefilling(false);
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -246,6 +296,12 @@ export default function NewTender() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold font-heading">{t('tender.new')}</h1>
         <p className="text-sm text-muted-foreground mt-1">{t('tender.details')}</p>
+        {aiPrefilling && (
+          <div className="flex items-center gap-2 mt-3 text-xs text-primary animate-pulse">
+            <Sparkles className="h-4 w-4" />
+            {t('tender.aiAnalyzing')}
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
