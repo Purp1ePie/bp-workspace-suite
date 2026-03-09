@@ -16,6 +16,7 @@ import TenderWorkspace from "@/pages/TenderWorkspace";
 import CompanyMemory from "@/pages/CompanyMemory";
 import Checklist from "@/pages/Checklist";
 import Settings from "@/pages/Settings";
+import Team from "@/pages/Team";
 import SIMAPDiscovery from "@/pages/SIMAPDiscovery";
 import NotFound from "./pages/NotFound";
 
@@ -46,6 +47,7 @@ const App = () => (
                 <Route path="/discover" element={<SIMAPDiscovery />} />
                 <Route path="/memory" element={<CompanyMemory />} />
                 <Route path="/checklist" element={<Checklist />} />
+                <Route path="/team" element={<Team />} />
                 <Route path="/settings" element={<Settings />} />
               </Route>
               <Route path="*" element={<NotFound />} />

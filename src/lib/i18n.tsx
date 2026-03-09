@@ -9,6 +9,7 @@ const translations = {
   'nav.newTender': { de: 'Neue Ausschreibung', en: 'New Tender' },
   'nav.memory': { de: 'Firmenwissen', en: 'Company Memory' },
   'nav.checklist': { de: 'Checkliste', en: 'Checklist' },
+  'nav.team': { de: 'Team', en: 'Team' },
   'nav.settings': { de: 'Einstellungen', en: 'Settings' },
   'nav.logout': { de: 'Abmelden', en: 'Log out' },
 
@@ -220,6 +221,23 @@ const translations = {
 
   // Tender AI Prefill
   'tender.aiAnalyzing': { de: 'KI analysiert Ihre Dokumente...', en: 'AI analyzing your documents...' },
+
+  // Team page
+  'team.title': { de: 'Team', en: 'Team' },
+  'team.subtitle': { de: 'Teamübersicht und Aufgabenverteilung', en: 'Team overview and task distribution' },
+  'team.totalMembers': { de: 'Mitglieder', en: 'Members' },
+  'team.activeTenders': { de: 'Aktive Ausschreibungen', en: 'Active Tenders' },
+  'team.totalTasks': { de: 'Aufgaben gesamt', en: 'Total Tasks' },
+  'team.completionRate': { de: 'Abschlussrate', en: 'Completion Rate' },
+  'team.filterAll': { de: 'Alle', en: 'All' },
+  'team.filterAdmins': { de: 'Admins', en: 'Admins' },
+  'team.tasksOpen': { de: 'offen', en: 'open' },
+  'team.tasksDone': { de: 'erledigt', en: 'done' },
+  'team.tenders': { de: 'Ausschreibungen', en: 'Tenders' },
+  'team.noMembers': { de: 'Keine Teammitglieder', en: 'No team members' },
+  'team.noTasks': { de: 'Keine zugewiesenen Aufgaben', en: 'No assigned tasks' },
+  'team.viewTasks': { de: 'Aufgaben anzeigen', en: 'View tasks' },
+  'team.manageTeam': { de: 'Team verwalten', en: 'Manage team' },
 
   // Checklist (standalone)
   'checklist.title': { de: 'Checkliste', en: 'Checklist' },

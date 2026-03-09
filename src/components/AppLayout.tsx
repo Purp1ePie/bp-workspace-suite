@@ -9,6 +9,7 @@ import {
   Folders,
   BookOpen,
   CheckSquare,
+  Users,
   Settings,
   LogOut,
   Menu,
@@ -32,6 +33,7 @@ const navItems = [
   { to: '/discover', icon: Compass, labelKey: 'nav.discover' as const },
   { to: '/memory', icon: BookOpen, labelKey: 'nav.memory' as const },
   { to: '/checklist', icon: CheckSquare, labelKey: 'nav.checklist' as const },
+  { to: '/team', icon: Users, labelKey: 'nav.team' as const },
   { to: '/settings', icon: Settings, labelKey: 'nav.settings' as const },
 ];
 
