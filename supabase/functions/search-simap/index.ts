@@ -128,8 +128,11 @@ serve(async (req: Request) => {
         deadline = p.lots[0]?.offerDeadline || p.lots[0]?.deadline || null;
       }
 
-      // Extract canton from orderAddress
-      const canton = p.orderAddress?.canton || null;
+      // Extract canton from orderAddress (API uses cantonId)
+      const canton = p.orderAddress?.cantonId || p.orderAddress?.canton || null;
+
+      // Extract publication ID for later use with publication-details endpoint
+      const publicationId = p.publicationId || null;
 
       // Extract CPV codes
       const cpvCodes = p.cpvCodes || p.lots?.[0]?.cpvCodes || [];
@@ -144,12 +147,16 @@ serve(async (req: Request) => {
 
       return {
         project_id: projectId,
+        publication_id: publicationId,
         title,
         description,
         issuer,
         publication_date: p.publicationDate || null,
+        publication_number: p.publicationNumber || null,
+        pub_type: p.pubType || null,
         deadline,
         project_type: p.projectType || null,
+        project_sub_type: p.projectSubType || null,
         process_type: p.processType || null,
         canton,
         cpv_codes: cpvCodes,

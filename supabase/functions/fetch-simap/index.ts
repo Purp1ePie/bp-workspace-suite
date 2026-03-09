@@ -45,7 +45,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { simap_url, simap_project_id } = await req.json();
+    const { simap_url, simap_project_id, publication_id } = await req.json();
 
     // Determine project ID
     let projectId = simap_project_id;
@@ -151,6 +151,24 @@ serve(async (req: Request) => {
 
     console.log(`[fetch-simap] Project keys:`, Object.keys(project));
 
+    // Try to get rich publication details (requires auth — will work once OAuth is set up)
+    let pubDetail: any = null;
+    const pubId = publication_id || project.publicationId || project.latestPublication?.id;
+    if (pubId) {
+      const pubDetailUrl = `${SIMAP_API_BASE}/publications/v1/project/${project.id || projectId}/publication-details/${pubId}`;
+      console.log(`[fetch-simap] Trying publication-details: ${pubDetailUrl}`);
+      try {
+        const pubResp = await fetch(pubDetailUrl, { headers });
+        console.log(`[fetch-simap] publication-details → ${pubResp.status}`);
+        if (pubResp.ok) {
+          pubDetail = await pubResp.json();
+          console.log(`[fetch-simap] Got publication details, keys:`, Object.keys(pubDetail));
+        }
+      } catch (e) {
+        console.log(`[fetch-simap] publication-details failed:`, e);
+      }
+    }
+
     const title = pickTranslation(project.title);
     const issuer = pickTranslation(project.procOfficeName) || pickTranslation(project.orderAddress?.name);
     const resolvedId = project.id || project.projectId || projectId;
@@ -185,7 +203,13 @@ serve(async (req: Request) => {
       else if (project.title.en && !project.title.de) language = "en";
     }
 
-    // Build synthetic description from available metadata
+    // Try to get real description from publication details (orderDescription)
+    const realDescription = pubDetail
+      ? pickTranslation(pubDetail.procurement?.orderDescription, language) ||
+        (pubDetail.lots?.[0] ? pickTranslation(pubDetail.lots[0].orderDescription, language) : "")
+      : "";
+
+    // Build synthetic description from available metadata (fallback)
     const descParts: string[] = [];
     const projectType = project.projectType || null;
     const projectSubType = project.projectSubType || null;
@@ -247,13 +271,16 @@ serve(async (req: Request) => {
 
     const tenderType = "public"; // SIMAP is public procurement
 
+    // Prefer real description from publication-details, fall back to synthetic
+    const finalDescription = realDescription || description || null;
+
     return new Response(
       JSON.stringify({
         success: true,
         data: {
           title,
           issuer,
-          description: description || null,
+          description: finalDescription,
           deadline,
           language,
           canton,

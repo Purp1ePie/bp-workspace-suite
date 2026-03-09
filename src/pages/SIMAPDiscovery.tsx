@@ -18,12 +18,16 @@ function pickTranslation(t: any, preferredLang = 'de'): string {
 
 interface SimapResult {
   project_id: string;
+  publication_id: string | null;
   title: string;
   description: string;
   issuer: string;
   publication_date: string | null;
+  publication_number: string | null;
+  pub_type: string | null;
   deadline: string | null;
   project_type: string | null;
+  project_sub_type: string | null;
   process_type: string | null;
   canton: string | null;
   cpv_codes: string[];
@@ -90,6 +94,7 @@ export default function SIMAPDiscovery() {
         const fetchResult = await callEdgeFunction('fetch-simap', {
           simap_project_id: item.project_id,
           simap_url: item.simap_url,
+          publication_id: item.publication_id,
         });
         richData = fetchResult.data;
       } catch {
