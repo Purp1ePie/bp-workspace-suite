@@ -181,7 +181,7 @@ function buildDocument(
   tender: {
     title: string;
     issuer: string | null;
-    submission_deadline: string | null;
+    deadline: string | null;
     language: string | null;
   },
   sections: Array<{
@@ -229,11 +229,11 @@ function buildDocument(
   if (tender.issuer) {
     metaRows.push(makeMetaRow(l.issuer, tender.issuer));
   }
-  if (tender.submission_deadline) {
+  if (tender.deadline) {
     metaRows.push(
       makeMetaRow(
         l.deadline,
-        formatDate(tender.submission_deadline, lang),
+        formatDate(tender.deadline, lang),
       ),
     );
   }
@@ -490,7 +490,7 @@ serve(async (req: Request) => {
     const { data: tender, error: tenderError } = await adminClient
       .from("tenders")
       .select(
-        "id, title, issuer, submission_deadline, language, organization_id",
+        "id, title, issuer, deadline, language, organization_id",
       )
       .eq("id", tender_id)
       .eq("organization_id", orgId)
