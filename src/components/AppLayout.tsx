@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Building2,
   User,
+  Compass,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
@@ -24,6 +25,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' as const },
   { to: '/tenders/new', icon: FolderPlus, labelKey: 'nav.newTender' as const },
   { to: '/tenders', icon: Folders, labelKey: 'nav.tenders' as const },
+  { to: '/discover', icon: Compass, labelKey: 'nav.discover' as const },
   { to: '/memory', icon: BookOpen, labelKey: 'nav.memory' as const },
   { to: '/checklist', icon: CheckSquare, labelKey: 'nav.checklist' as const },
   { to: '/settings', icon: Settings, labelKey: 'nav.settings' as const },

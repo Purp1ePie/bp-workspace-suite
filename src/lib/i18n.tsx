@@ -227,6 +227,33 @@ const translations = {
   'status.processing': { de: 'Wird verarbeitet', en: 'Processing' },
   'status.failed': { de: 'Fehlgeschlagen', en: 'Failed' },
   'status.pending': { de: 'Ausstehend', en: 'Pending' },
+
+  // Navigation - Discovery
+  'nav.discover': { de: 'Entdecken', en: 'Discover' },
+
+  // SIMAP fetch
+  'simap.fetch': { de: 'Von SIMAP laden', en: 'Fetch from SIMAP' },
+  'simap.fetching': { de: 'Wird geladen...', en: 'Fetching...' },
+  'simap.fetchSuccess': { de: 'Daten von SIMAP geladen', en: 'Data loaded from SIMAP' },
+  'simap.fetchError': { de: 'Fehler beim Laden von SIMAP', en: 'Error loading from SIMAP' },
+
+  // Discovery page
+  'discover.title': { de: 'SIMAP Entdecken', en: 'SIMAP Discovery' },
+  'discover.subtitle': { de: 'Öffentliche Ausschreibungen aus SIMAP durchsuchen und importieren', en: 'Search and import public tenders from SIMAP' },
+  'discover.searchPlaceholder': { de: 'Suchbegriff eingeben, z.B. IT, Beratung...', en: 'Enter search term, e.g. IT, consulting...' },
+  'discover.search': { de: 'Suchen', en: 'Search' },
+  'discover.searching': { de: 'Suche läuft...', en: 'Searching...' },
+  'discover.noResults': { de: 'Keine Ergebnisse', en: 'No results' },
+  'discover.noResultsHint': { de: 'Versuchen Sie einen anderen Suchbegriff', en: 'Try a different search term' },
+  'discover.import': { de: 'Importieren', en: 'Import' },
+  'discover.importing': { de: 'Wird importiert...', en: 'Importing...' },
+  'discover.imported': { de: 'Ausschreibung importiert', en: 'Tender imported' },
+  'discover.importedDescription': { de: 'Die Ausschreibung wurde erfolgreich importiert', en: 'The tender has been successfully imported' },
+  'discover.resultsCount': { de: 'Ergebnisse', en: 'results' },
+  'discover.loadMore': { de: 'Mehr laden', en: 'Load more' },
+  'discover.publicationDate': { de: 'Veröffentlicht', en: 'Published' },
+  'discover.openOnSimap': { de: 'Auf SIMAP öffnen', en: 'Open on SIMAP' },
+  'discover.processType': { de: 'Verfahren', en: 'Procedure' },
 } as const;
 
 type TranslationKey = keyof typeof translations;

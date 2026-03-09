@@ -2,42 +2,17 @@ import { useState, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
+import { callEdgeFunction } from '@/lib/edgeFunctions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon, ArrowRight, AlertCircle, RefreshCw } from 'lucide-react';
+import { Upload, X, FileText, CheckCircle2, Loader2, Link as LinkIcon, ArrowRight, AlertCircle, RefreshCw, Download } from 'lucide-react';
 
 const SOURCE_TYPES = ['simap', 'email', 'upload', 'manual', 'portal'] as const;
 const TENDER_TYPES = ['public', 'private'] as const;
 
 type FlowState = 'idle' | 'uploading' | 'processing' | 'ready' | 'failed';
-
-async function getAccessToken(): Promise<string> {
-  const { data: sessionData } = await supabase.auth.getSession();
-  const accessToken = sessionData?.session?.access_token;
-  if (!accessToken) throw new Error('No active session. Please sign in again.');
-  return accessToken;
-}
-
-async function callEdgeFunction(functionName: string, body: Record<string, unknown>): Promise<any> {
-  const accessToken = await getAccessToken();
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${functionName}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-      },
-      body: JSON.stringify(body),
-    }
-  );
-  const result = await response.json();
-  if (!response.ok) throw new Error(result?.error || `${functionName} failed: ${response.status}`);
-  return result;
-}
 
 export default function NewTender() {
   const { t } = useI18n();
@@ -58,6 +33,29 @@ export default function NewTender() {
   const [createdTenderId, setCreatedTenderId] = useState<string | null>(null);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [processingError, setProcessingError] = useState<string | null>(null);
+  const [simapFetching, setSimapFetching] = useState(false);
+  const [simapProjectId, setSimapProjectId] = useState<string | null>(null);
+
+  const handleFetchSimap = async () => {
+    if (!simapLink) return;
+    setSimapFetching(true);
+    try {
+      const result = await callEdgeFunction('fetch-simap', { simap_url: simapLink });
+      if (result.success && result.data) {
+        const d = result.data;
+        if (d.title) setTitle(d.title);
+        if (d.issuer) setIssuer(d.issuer);
+        if (d.deadline) setDeadline(d.deadline.slice(0, 16));
+        if (d.language) setTenderLanguage(d.language);
+        if (d.simap_project_id) setSimapProjectId(d.simap_project_id);
+        toast({ title: t('simap.fetchSuccess') });
+      }
+    } catch (err: any) {
+      toast({ title: t('simap.fetchError'), description: err.message, variant: 'destructive' });
+    } finally {
+      setSimapFetching(false);
+    }
+  };
 
   const handleFiles = (newFiles: FileList | File[]) => {
     setFiles(prev => [...prev, ...Array.from(newFiles)]);
@@ -141,6 +139,8 @@ export default function NewTender() {
           deadline: deadline ? new Date(deadline).toISOString() : null,
           language: tenderLanguage,
           organization_id: orgData,
+          ...(sourceType === 'simap' && simapLink ? { simap_url: simapLink } : {}),
+          ...(sourceType === 'simap' && simapProjectId ? { simap_project_id: simapProjectId } : {}),
         })
         .select()
         .single();
@@ -329,11 +329,29 @@ export default function NewTender() {
                 <LinkIcon className="h-3.5 w-3.5" />
                 {t('tender.simapLink')}
               </Label>
-              <Input
-                value={simapLink}
-                onChange={e => setSimapLink(e.target.value)}
-                placeholder={t('tender.simapLinkPlaceholder')}
-              />
+              <div className="flex gap-2">
+                <Input
+                  value={simapLink}
+                  onChange={e => setSimapLink(e.target.value)}
+                  placeholder={t('tender.simapLinkPlaceholder')}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleFetchSimap}
+                  disabled={!simapLink || simapFetching}
+                  className="shrink-0 h-10"
+                >
+                  {simapFetching ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-1.5" />
+                  )}
+                  {simapFetching ? t('simap.fetching') : t('simap.fetch')}
+                </Button>
+              </div>
             </div>
           )}
         </div>

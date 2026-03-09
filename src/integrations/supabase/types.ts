@@ -591,6 +591,8 @@ export type Database = {
           issuer: string | null
           language: string | null
           organization_id: string
+          simap_project_id: string | null
+          simap_url: string | null
           source_type: string
           status: string
           tender_type: string
@@ -606,6 +608,8 @@ export type Database = {
           issuer?: string | null
           language?: string | null
           organization_id: string
+          simap_project_id?: string | null
+          simap_url?: string | null
           source_type: string
           status?: string
           tender_type: string
@@ -621,6 +625,8 @@ export type Database = {
           issuer?: string | null
           language?: string | null
           organization_id?: string
+          simap_project_id?: string | null
+          simap_url?: string | null
           source_type?: string
           status?: string
           tender_type?: string

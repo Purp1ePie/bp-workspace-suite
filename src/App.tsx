@@ -16,6 +16,7 @@ import TenderWorkspace from "@/pages/TenderWorkspace";
 import CompanyMemory from "@/pages/CompanyMemory";
 import Checklist from "@/pages/Checklist";
 import Settings from "@/pages/Settings";
+import SIMAPDiscovery from "@/pages/SIMAPDiscovery";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -42,6 +43,7 @@ const App = () => (
                 <Route path="/tenders/new" element={<NewTender />} />
                 <Route path="/tenders" element={<Tenders />} />
                 <Route path="/tenders/:id" element={<TenderWorkspace />} />
+                <Route path="/discover" element={<SIMAPDiscovery />} />
                 <Route path="/memory" element={<CompanyMemory />} />
                 <Route path="/checklist" element={<Checklist />} />
                 <Route path="/settings" element={<Settings />} />

@@ -45,3 +45,13 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/export-clarifications-doc/deno.json"
 entrypoint = "./functions/export-clarifications-doc/index.ts"
+
+[functions.search-simap]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/search-simap/index.ts"
+
+[functions.fetch-simap]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/fetch-simap/index.ts"
