@@ -355,6 +355,25 @@ const translations = {
   'workspace.bidCon.deadlineUrgent': { de: 'Frist in weniger als 7 Tagen', en: 'Deadline in less than 7 days' },
   'activity.bid_decision_changed': { de: 'hat eine Bid-Entscheidung getroffen', en: 'made a bid decision' },
 
+  // Checklist manual tasks
+  'workspace.addTask': { de: 'Aufgabe hinzufügen', en: 'Add task' },
+  'workspace.taskTitle': { de: 'Neue Aufgabe...', en: 'New task...' },
+  'workspace.taskAdded': { de: 'Aufgabe hinzugefügt', en: 'Task added' },
+  'workspace.taskDeleted': { de: 'Aufgabe gelöscht', en: 'Task deleted' },
+  'workspace.dueOptional': { de: 'Fällig (optional)', en: 'Due (optional)' },
+
+  // Knowledge match UX
+  'workspace.matchExplanation': { de: 'Akzeptieren Sie passende Matches oder lehnen Sie unpassende ab. Abgelehnte Matches werden aus der Abdeckungsberechnung entfernt und beeinflussen den Readiness-Score.', en: 'Accept relevant matches or reject irrelevant ones. Rejected matches are excluded from coverage calculations and affect the readiness score.' },
+  'workspace.whyMatch': { de: 'Warum dieses Match?', en: 'Why this match?' },
+  'workspace.matchTitleTerms': { de: 'Begriffe im Titel', en: 'Title keyword matches' },
+  'workspace.matchTextTerms': { de: 'Begriffe im Inhalt', en: 'Content keyword matches' },
+  'workspace.matchTypeBonus': { de: 'Typ-Bonus', en: 'Type bonus' },
+  'workspace.matchCatBonus': { de: 'Kategorie-Bonus', en: 'Category bonus' },
+  'workspace.textPreview': { de: 'Vorschau', en: 'Preview' },
+  'workspace.noPreview': { de: 'Kein Text verfügbar', en: 'No text available' },
+  'workspace.acceptMatch': { de: 'Akzeptieren', en: 'Accept' },
+  'workspace.rejectMatch': { de: 'Ablehnen', en: 'Reject' },
+
   // Process stepper & next action
   'process.title': { de: 'Bearbeitungsprozess', en: 'Workflow' },
   'process.documents': { de: 'Dokumente', en: 'Documents' },

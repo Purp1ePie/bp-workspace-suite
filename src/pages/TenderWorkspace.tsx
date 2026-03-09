@@ -76,6 +76,22 @@ const severityConfig: Record<string, { color: string; dot: string }> = {
   low: { color: 'text-info bg-info/15', dot: 'bg-info' },
 };
 
+function parseMatchReason(reason: string | null): { key: string; value: number }[] {
+  if (!reason) return [];
+  const items: { key: string; value: number }[] = [];
+  const parts = reason.split(',').map(s => s.trim());
+  for (const part of parts) {
+    const [k, v] = part.split('=');
+    if (!k || !v) continue;
+    const num = parseInt(v, 10);
+    if (k === 'title' && num > 0) items.push({ key: 'matchTitleTerms', value: num });
+    if (k === 'text' && num > 0) items.push({ key: 'matchTextTerms', value: num });
+    if (k === 'type_bonus' && num > 0) items.push({ key: 'matchTypeBonus', value: num });
+    if (k === 'cat_bonus' && num > 0) items.push({ key: 'matchCatBonus', value: num });
+  }
+  return items;
+}
+
 export default function TenderWorkspace() {
   const { id } = useParams<{ id: string }>();
   const { t, language } = useI18n();
@@ -308,6 +324,35 @@ export default function TenderWorkspace() {
     }
   };
 
+  const handleAddChecklistItem = async () => {
+    if (!id || !tender || !newTaskTitle.trim()) return;
+    const { data, error } = await supabase.from('checklist_items').insert({
+      tender_id: id,
+      organization_id: tender.organization_id,
+      title: newTaskTitle.trim(),
+      due_at: newTaskDue || null,
+      status: 'open',
+    }).select().single();
+    if (error) {
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
+    } else if (data) {
+      setChecklist(prev => [...prev, data]);
+      setNewTaskTitle('');
+      setNewTaskDue('');
+      toast({ title: t('workspace.taskAdded') });
+    }
+  };
+
+  const handleDeleteChecklistItem = async (itemId: string) => {
+    const { error } = await supabase.from('checklist_items').delete().eq('id', itemId);
+    if (error) {
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
+    } else {
+      setChecklist(prev => prev.filter(c => c.id !== itemId));
+      toast({ title: t('workspace.taskDeleted') });
+    }
+  };
+
   const handleBidDecision = async (decision: 'bid' | 'no_bid') => {
     if (!id || !tender) return;
     const newDecision = tender.bid_decision === decision ? null : decision;
@@ -492,6 +537,9 @@ export default function TenderWorkspace() {
   const [editingQuestionText, setEditingQuestionText] = useState('');
   const [deleteDocTarget, setDeleteDocTarget] = useState<Doc | null>(null);
   const [deletingDoc, setDeletingDoc] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskDue, setNewTaskDue] = useState('');
+  const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null);
 
   const handleDeleteDocument = async () => {
     if (!deleteDocTarget) return;
@@ -689,7 +737,7 @@ export default function TenderWorkspace() {
   const checklistProgress = checklist.length > 0 ? Math.round((completedChecklist / checklist.length) * 100) : 0;
 
   // Gap & readiness computations
-  const matchedReqIds = new Set(matches.map(m => m.requirement_id));
+  const matchedReqIds = new Set(matches.filter(m => m.status !== 'rejected').map(m => m.requirement_id));
   const unmatchedReqs = requirements.filter(r => !matchedReqIds.has(r.id));
   const gapSection = sections.find(s => s.section_title === 'Coverage Gaps');
   const fitScoreColor = (tender.fit_score ?? 0) >= 70 ? 'text-success' : (tender.fit_score ?? 0) >= 40 ? 'text-warning' : 'text-destructive';
@@ -1560,6 +1608,14 @@ export default function TenderWorkspace() {
               </Button>
             </div>
 
+            {/* Explanation banner */}
+            {matches.length > 0 && (
+              <div className="flex items-start gap-2.5 px-4 py-3 rounded-lg bg-muted/30 border border-border/50">
+                <Info className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                <p className="text-xs text-muted-foreground leading-relaxed">{t('workspace.matchExplanation')}</p>
+              </div>
+            )}
+
             {matches.length === 0 ? (
               <EmptyState
                 icon={BookOpen}
@@ -1611,49 +1667,117 @@ export default function TenderWorkspace() {
                         <div className="divide-y divide-border">
                           {reqMatches.map(match => {
                             const asset = assetMap.get(match.knowledge_asset_id);
-                            const statusColors: Record<string, string> = {
+                            const matchStatusColors: Record<string, string> = {
                               suggested: 'bg-primary/10 text-primary',
                               accepted: 'bg-success/15 text-success',
                               rejected: 'bg-destructive/15 text-destructive',
                             };
+                            const isExpanded = expandedMatchId === match.id;
+                            const reasons = parseMatchReason(match.match_reason);
+                            const fileExt = asset?.storage_path ? asset.storage_path.split('.').pop()?.toUpperCase() : null;
+                            const textPreview = asset?.extracted_text ? asset.extracted_text.slice(0, 200).trim() + (asset.extracted_text.length > 200 ? '...' : '') : null;
+
                             return (
-                              <div key={match.id} className="px-5 py-3.5 flex items-center gap-4">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-sm font-medium truncate">{asset?.title || 'Unknown asset'}</p>
-                                    {asset?.asset_type && (
-                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium capitalize shrink-0">
-                                        {asset.asset_type.replace('_', ' ')}
+                              <div key={match.id}>
+                                <div
+                                  className={`px-5 py-3.5 flex items-center gap-4 cursor-pointer transition-colors hover:bg-accent/30 ${match.status === 'rejected' ? 'opacity-50' : ''}`}
+                                  onClick={() => setExpandedMatchId(isExpanded ? null : match.id)}
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-medium truncate">{asset?.title || 'Unknown asset'}</p>
+                                      {asset?.asset_type && (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium capitalize shrink-0">
+                                          {asset.asset_type.replace('_', ' ')}
+                                        </span>
+                                      )}
+                                      {fileExt && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/70 text-muted-foreground font-mono shrink-0">
+                                          {fileExt}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-3 mt-1">
+                                      <span className="text-xs text-muted-foreground">
+                                        {t('workspace.confidence')}: <span className="font-semibold text-foreground">{match.confidence_score}%</span>
                                       </span>
-                                    )}
+                                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${matchStatusColors[match.status] || 'bg-muted text-muted-foreground'}`}>
+                                        {match.status === 'suggested' ? t('workspace.confidence') : match.status === 'accepted' ? t('workspace.acceptMatch') : t('workspace.rejectMatch')}
+                                      </span>
+                                      {reasons.length > 0 && !isExpanded && (
+                                        <span className="text-[10px] text-muted-foreground/60">
+                                          {reasons.map(r => `${r.value}× ${t(`workspace.${r.key}` as any)}`).join(' · ')}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
-                                  <div className="flex items-center gap-3 mt-1">
-                                    <span className="text-xs text-muted-foreground">
-                                      Confidence: <span className="font-semibold text-foreground">{match.confidence_score}%</span>
-                                    </span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${statusColors[match.status] || 'bg-muted text-muted-foreground'}`}>
-                                      {match.status}
-                                    </span>
-                                  </div>
+                                  {match.status === 'suggested' && (
+                                    <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 px-2 text-success hover:bg-success/10 hover:text-success text-xs gap-1"
+                                        onClick={() => handleUpdateMatchStatus(match.id, 'accepted')}
+                                        title={t('workspace.acceptMatch')}
+                                      >
+                                        <Check className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive text-xs gap-1"
+                                        onClick={() => handleUpdateMatchStatus(match.id, 'rejected')}
+                                        title={t('workspace.rejectMatch')}
+                                      >
+                                        <XIcon className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  )}
                                 </div>
-                                {match.status === 'suggested' && (
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-8 w-8 p-0 text-success hover:bg-success/10 hover:text-success"
-                                      onClick={() => handleUpdateMatchStatus(match.id, 'accepted')}
-                                    >
-                                      <Check className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                      onClick={() => handleUpdateMatchStatus(match.id, 'rejected')}
-                                    >
-                                      <XIcon className="h-4 w-4" />
-                                    </Button>
+
+                                {/* Expanded details */}
+                                {isExpanded && (
+                                  <div className="px-5 pb-4 pt-0 border-t border-border/30 bg-muted/20">
+                                    <div className="pt-3 space-y-3">
+                                      {/* Match reasons */}
+                                      {reasons.length > 0 && (
+                                        <div>
+                                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t('workspace.whyMatch')}</p>
+                                          <div className="space-y-1">
+                                            {reasons.map((r, i) => (
+                                              <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                <CheckCircle2 className="h-3 w-3 text-primary shrink-0" />
+                                                <span>{r.value}× {t(`workspace.${r.key}` as any)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Text preview */}
+                                      <div>
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t('workspace.textPreview')}</p>
+                                        {textPreview ? (
+                                          <p className="text-xs text-muted-foreground leading-relaxed bg-background/50 rounded p-2.5 border border-border/30">
+                                            {textPreview}
+                                          </p>
+                                        ) : (
+                                          <p className="text-xs text-muted-foreground/50 italic">{t('workspace.noPreview')}</p>
+                                        )}
+                                      </div>
+
+                                      {/* Tags */}
+                                      {asset?.tags && asset.tags.length > 0 && (
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          <Tag className="h-3 w-3 text-muted-foreground" />
+                                          {asset.tags.map((tag, i) => (
+                                            <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                                              {tag}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -1910,6 +2034,29 @@ export default function TenderWorkspace() {
                 </div>
               )}
 
+              {/* Add manual task */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newTaskTitle}
+                  onChange={e => setNewTaskTitle(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAddChecklistItem()}
+                  placeholder={t('workspace.taskTitle')}
+                  className="flex-1 h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground/50"
+                />
+                <input
+                  type="date"
+                  value={newTaskDue}
+                  onChange={e => setNewTaskDue(e.target.value)}
+                  className="h-9 px-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 text-muted-foreground w-[130px]"
+                  title={t('workspace.dueOptional')}
+                />
+                <Button size="sm" onClick={handleAddChecklistItem} disabled={!newTaskTitle.trim()}>
+                  <Check className="h-3.5 w-3.5 mr-1" />
+                  {t('workspace.addTask')}
+                </Button>
+              </div>
+
               {/* Open items first, then done */}
               <div className="space-y-2">
                 {[...filteredChecklist].sort((a, b) => {
@@ -1919,7 +2066,7 @@ export default function TenderWorkspace() {
                 }).map(c => (
                   <div
                     key={c.id}
-                    className={`glass-card transition-colors hover:border-primary/20 ${
+                    className={`glass-card transition-colors hover:border-primary/20 group/item ${
                       c.status === 'done' ? 'opacity-60' : ''
                     }`}
                   >
@@ -2001,6 +2148,13 @@ export default function TenderWorkspace() {
                           {format(new Date(c.due_at), 'dd MMM', { locale: dateFnsLocale })}
                         </span>
                       )}
+
+                      <button
+                        onClick={() => handleDeleteChecklistItem(c.id)}
+                        className="opacity-0 group-hover/item:opacity-100 transition-opacity text-muted-foreground hover:text-destructive p-1 rounded shrink-0"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
 
                     {/* Expanded comments section */}
