@@ -71,6 +71,7 @@ const reviewStatusColors: Record<string, string> = {
 };
 
 const severityConfig: Record<string, { color: string; dot: string }> = {
+  critical: { color: 'text-destructive bg-destructive/20 font-bold', dot: 'bg-destructive' },
   high: { color: 'text-destructive bg-destructive/15', dot: 'bg-destructive' },
   medium: { color: 'text-warning bg-warning/15', dot: 'bg-warning' },
   low: { color: 'text-info bg-info/15', dot: 'bg-info' },
@@ -1549,18 +1550,24 @@ export default function TenderWorkspace() {
                 <div className="space-y-2">
                   {risks.map(r => {
                     const sev = severityConfig[r.severity || ''] || { color: 'bg-muted text-muted-foreground', dot: 'bg-muted-foreground' };
+                    const riskTypeLabel = t(`riskType.${r.risk_type}` as any) || r.risk_type.replace(/_/g, ' ');
+                    const severityLabel = r.severity ? (t(`severity.${r.severity}` as any) || r.severity) : '';
+                    const displayTitle = (r as any).title || riskTypeLabel;
                     return (
                       <div key={r.id} className="glass-card px-5 py-4 hover:border-primary/20 transition-colors">
                         <div className="flex items-start gap-3">
                           <span className={`h-2 w-2 rounded-full mt-1.5 shrink-0 ${sev.dot}`} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium">{r.risk_type}</span>
+                              <span className="text-sm font-medium">{displayTitle}</span>
                               {r.severity && (
                                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${sev.color}`}>
-                                  {r.severity}
+                                  {severityLabel}
                                 </span>
                               )}
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
+                                {riskTypeLabel}
+                              </span>
                             </div>
                             {r.description && <p className="text-sm text-muted-foreground leading-relaxed mt-1.5">{r.description}</p>}
                           </div>
@@ -1589,13 +1596,14 @@ export default function TenderWorkspace() {
                   {deadlines.map(d => {
                     const dueDate = new Date(d.due_at);
                     const isPast = dueDate < new Date();
+                    const deadlineTypeLabel = t(`deadlineType.${d.deadline_type}` as any) || d.deadline_type.replace(/_/g, ' ');
                     return (
                       <div key={d.id} className="glass-card px-5 py-4 hover:border-primary/20 transition-colors">
                         <div className="flex items-center justify-between">
                           <div className="flex items-start gap-3 flex-1 min-w-0">
                             <Clock className={`h-4 w-4 mt-0.5 shrink-0 ${isPast ? 'text-destructive' : 'text-warning'}`} />
                             <div>
-                              <span className="text-sm font-medium">{d.deadline_type}</span>
+                              <span className="text-sm font-medium">{deadlineTypeLabel}</span>
                               {d.description && <p className="text-sm text-muted-foreground mt-0.5">{d.description}</p>}
                             </div>
                           </div>

@@ -434,6 +434,31 @@ const translations = {
   'dashboard.deadlineUrgency': { de: 'Überfällige Fristen', en: 'Overdue Deadlines' },
   'dashboard.dueThisWeek': { de: 'diese Woche fällig', en: 'due this week' },
   'dashboard.bidDecisions': { de: 'Bid-Entscheidungen', en: 'Bid Decisions' },
+
+  // Risk types (localized labels)
+  'riskType.missing_information': { de: 'Fehlende Informationen', en: 'Missing Information' },
+  'riskType.tight_deadline': { de: 'Enge Frist', en: 'Tight Deadline' },
+  'riskType.unusual_requirement': { de: 'Ungewöhnliche Anforderung', en: 'Unusual Requirement' },
+  'riskType.high_penalty': { de: 'Hohe Konventionalstrafe', en: 'High Penalty' },
+  'riskType.scope_ambiguity': { de: 'Unklarer Umfang', en: 'Scope Ambiguity' },
+  'riskType.resource_intensive': { de: 'Ressourcenintensiv', en: 'Resource Intensive' },
+  'riskType.legal_risk': { de: 'Rechtliches Risiko', en: 'Legal Risk' },
+  'riskType.financial_risk': { de: 'Finanzielles Risiko', en: 'Financial Risk' },
+
+  // Deadline types (localized labels)
+  'deadlineType.submission': { de: 'Einreichungsfrist', en: 'Submission Deadline' },
+  'deadlineType.clarification': { de: 'Fragefrist', en: 'Clarification Deadline' },
+  'deadlineType.site_visit': { de: 'Begehung', en: 'Site Visit' },
+  'deadlineType.q_and_a': { de: 'Fragen & Antworten', en: 'Q&A' },
+  'deadlineType.award': { de: 'Zuschlagsentscheid', en: 'Award Decision' },
+  'deadlineType.contract_start': { de: 'Vertragsbeginn', en: 'Contract Start' },
+  'deadlineType.other': { de: 'Sonstige Frist', en: 'Other Deadline' },
+
+  // Severity levels (localized labels)
+  'severity.low': { de: 'Niedrig', en: 'Low' },
+  'severity.medium': { de: 'Mittel', en: 'Medium' },
+  'severity.high': { de: 'Hoch', en: 'High' },
+  'severity.critical': { de: 'Kritisch', en: 'Critical' },
 } as const;
 
 type TranslationKey = keyof typeof translations;

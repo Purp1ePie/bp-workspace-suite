@@ -25,6 +25,7 @@ interface ExtractedDeadline {
 }
 
 interface ExtractedRisk {
+  title: string;
   risk_type: string;
   severity: string;
   description: string;
@@ -70,9 +71,10 @@ Identify all dates and deadlines mentioned. For each:
 
 ## Risks
 Identify potential risks or concerns a bidder should be aware of. For each:
+- "title": A short, specific, human-readable title (max 60 chars) describing THIS particular risk. Write it in the original document language. Be specific, e.g. "Einreichungsfrist nur 10 Arbeitstage" or "Konventionalstrafe von 5% bei Verzug" — NOT generic labels.
 - "risk_type": One of "missing_information", "tight_deadline", "unusual_requirement", "high_penalty", "scope_ambiguity", "resource_intensive", "legal_risk", "financial_risk"
 - "severity": One of "low", "medium", "high", "critical"
-- "description": Brief description of the risk, in the original document language.
+- "description": A clear, actionable description of the risk and what the bidder should consider, in the original document language (2-3 sentences).
 
 Return ONLY a valid JSON object with this exact structure (no markdown, no explanation, no wrapping):
 {
@@ -654,6 +656,7 @@ serve(async (req) => {
           const riskRows = extraction.risks.map((r) => ({
             tender_id,
             organization_id: tender.organization_id,
+            title: r.title || null,
             risk_type: r.risk_type,
             severity: r.severity,
             description: r.description,
