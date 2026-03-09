@@ -8,8 +8,8 @@ const corsHeaders = {
 
 // ── Embedding helpers ──────────────────────────────────────────────
 
-const EMBEDDING_MODEL = "text-embedding-3-small";
-const MAX_ASSET_TEXT_FOR_EMBEDDING = 1500;
+const EMBEDDING_MODEL = "text-embedding-3-large";
+const MAX_ASSET_TEXT_FOR_EMBEDDING = 2000;
 
 async function getEmbeddings(texts: string[], apiKey: string): Promise<number[][]> {
   // Batch up to 100 texts per API call (OpenAI limit is 2048)
@@ -247,11 +247,11 @@ serve(async (req) => {
         const catBonus = categoryBonus(req.category, asset.asset_type);
         const hasText = asset.extracted_text && asset.extracted_text.length > 0;
 
-        // Semantic similarity is primary (0-1 range → 0-80 score)
+        // Semantic similarity is primary (0-1 range → 0-85 score)
         // Category bonus adds up to 10
-        // Having extracted text adds 5 (richer context = more trustworthy)
-        const semanticScore = Math.round(similarity * 80);
-        const score = Math.min(100, semanticScore + catBonus + (hasText ? 5 : 0));
+        // Having extracted text adds 3 (richer context = more trustworthy)
+        const semanticScore = Math.round(similarity * 85);
+        const score = Math.min(100, semanticScore + catBonus + (hasText ? 3 : 0));
 
         return {
           asset,
@@ -261,10 +261,10 @@ serve(async (req) => {
         };
       });
 
-      // Filter: require at least 25% semantic similarity (similarity > 0.25)
-      // and a minimum combined score of 25
+      // Filter: require at least 40% semantic similarity to avoid noise
+      // and a minimum combined score of 35
       const topMatches = scored
-        .filter((m) => m.similarity >= 0.25 && m.score >= 25)
+        .filter((m) => m.similarity >= 0.40 && m.score >= 35)
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
 

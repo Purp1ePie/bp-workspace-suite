@@ -1867,9 +1867,15 @@ export default function TenderWorkspace() {
                                           <button
                                             onClick={async (e) => {
                                               e.stopPropagation();
-                                              const { data } = await supabase.storage.from('knowledge-assets').createSignedUrl(asset.storage_path!, 600);
-                                              if (data?.signedUrl) {
+                                              try {
+                                                const { data, error } = await supabase.storage.from('knowledge-assets').createSignedUrl(asset.storage_path!, 600);
+                                                if (error || !data?.signedUrl) {
+                                                  toast({ title: t('common.error'), description: 'Datei nicht gefunden / File not found', variant: 'destructive' });
+                                                  return;
+                                                }
                                                 window.open(data.signedUrl, '_blank');
+                                              } catch {
+                                                toast({ title: t('common.error'), description: 'Datei nicht gefunden / File not found', variant: 'destructive' });
                                               }
                                             }}
                                             className="text-xs text-primary hover:text-primary/80 flex items-center gap-1.5 transition-colors font-medium"
