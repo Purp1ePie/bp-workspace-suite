@@ -71,8 +71,8 @@ export default function NewTender() {
     const fileArray = Array.from(newFiles);
     setFiles(prev => [...prev, ...fileArray]);
 
-    // Auto-trigger AI prefill if form fields are empty
-    if (!title && !issuer && !deadline && !aiPrefilling) {
+    // Always trigger AI prefill when files are added (will only fill empty fields)
+    if (!aiPrefilling) {
       triggerAiPrefill(fileArray);
     }
   };
@@ -104,8 +104,9 @@ export default function NewTender() {
         if (s.language) setTenderLanguage(s.language);
         if (s.tender_type) setTenderType(s.tender_type);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('AI prefill failed (non-blocking):', err);
+      toast({ title: t('tender.aiAnalyzing'), description: err?.message || 'AI prefill failed', variant: 'destructive' });
     } finally {
       setAiPrefilling(false);
     }
@@ -119,11 +120,11 @@ export default function NewTender() {
     setFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
-  }, []);
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
