@@ -1,5 +1,16 @@
 project_id = "qitfusqfwdbgcrbuuxiu"
 
+[functions.suggest-metadata]
+enabled = true
+verify_jwt = false
+import_map = "./functions/suggest-metadata/deno.json"
+entrypoint = "./functions/suggest-metadata/index.ts"
+
+[functions.summarize-match]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/summarize-match/index.ts"
+
 [functions.process-tender]
 enabled = true
 verify_jwt = false

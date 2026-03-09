@@ -89,32 +89,37 @@ async function verifyMatchesWithLLM(
     `${i + 1}. [ID: ${c.assetId}] "${c.assetTitle}" (${c.assetType.replace(/_/g, " ")})\n   Content: ${c.textSnippet}`
   ).join("\n\n");
 
-  const systemPrompt = `You are a bid analyst evaluating whether company knowledge documents are relevant to a specific tender requirement.
+  const systemPrompt = `You are a Swiss bid compliance analyst. Your job is to evaluate whether company knowledge documents CONCRETELY FULFILL a specific tender requirement — not just whether they are "related".
 
-CRITICAL: Only score a document as relevant (50+) if the document's DOMAIN, SUBJECT MATTER, and CONTENT directly apply to the tender requirement.
+EVALUATION CRITERIA — Check each of these:
+1. DOMAIN MATCH: Is the document about the same domain/technology/service as the requirement?
+2. CONCRETE EVIDENCE: Does the document contain specific facts (project names, certifications, numbers, capabilities) that could be cited in a bid response?
+3. REQUIREMENT FULFILLMENT: Could this document be used as evidence that the company MEETS the requirement? Not just "related to" but actually "proves compliance with"?
+4. ACTIONABLE CONTENT: Would a bid writer be able to extract specific, quotable content from this document to answer the requirement?
 
 Superficial similarities do NOT count:
 - Both being "proposals" or "offers" is NOT enough
 - Both mentioning "project management" is NOT enough
-- The document must contain information that could actually help answer or fulfill the requirement
+- General company descriptions are NOT evidence for specific technical requirements
+- A CV is only relevant if the person has the SPECIFIC skills/certifications asked for
 
 Scoring — be precise, use the FULL range, do NOT cluster scores:
-- 0-20: Completely irrelevant (different domain/industry)
-- 21-39: Marginally related (same broad industry but different topic)
-- 40-49: Superficially similar but not directly applicable
-- 50-59: Somewhat relevant (overlapping domain, but only partially applicable)
-- 60-69: Clearly relevant (same domain, meaningful applicable content)
-- 70-79: Highly relevant (directly applicable knowledge and experience)
-- 80-89: Very strong match (document specifically covers this requirement area)
-- 90-100: Perfect match (document directly addresses and answers the requirement)
+- 0-20: No relevance (different domain entirely)
+- 21-39: Same broad domain but no applicable content for this specific requirement
+- 40-49: Tangentially related but lacks concrete evidence to fulfill the requirement
+- 50-59: Contains some relevant information but only partially addresses the requirement
+- 60-69: Clearly applicable — contains concrete evidence for a significant part of the requirement
+- 70-79: Strong match — contains specific, quotable evidence that directly fulfills most of the requirement
+- 80-89: Very strong — document specifically covers this requirement with detailed evidence (project references, certifications, metrics)
+- 90-100: Perfect — document is a direct, comprehensive answer to the requirement with full evidence
 
-DIFFERENTIATE scores: If one document covers the exact technology/service asked for and another only tangentially relates, there should be a significant score gap (20+ points). Never give all documents the same score.
+DIFFERENTIATE scores: Score gaps between documents should reflect actual differences in fulfillment. If one document has a specific certification asked for and another just mentions the topic generally, the gap should be 30+ points.
 
-IMPORTANT: Write the "reason" field in ${outputLanguage}. Keep it to one clear sentence.
+IMPORTANT: Write the "reason" field in ${outputLanguage}. The reason must state WHAT SPECIFIC CONTENT in the document is relevant and HOW it helps fulfill the requirement. Do NOT write generic reasons like "relevant to the topic".
 
-Return ONLY a valid JSON object: {"scores": [{"asset_id": "...", "score": N, "reason": "one sentence explanation in ${outputLanguage}"}]}`;
+Return ONLY a valid JSON object: {"scores": [{"asset_id": "...", "score": N, "reason": "specific explanation of what content fulfills the requirement, in ${outputLanguage}"}]}`;
 
-  const userPrompt = `TENDER REQUIREMENT (${requirementCategory || "general"}):\n"${requirementText}"\n\nCANDIDATE DOCUMENTS:\n${docsBlock}\n\nRate each document's relevance to this specific requirement.`;
+  const userPrompt = `TENDER REQUIREMENT (${requirementCategory || "general"}):\n"${requirementText}"\n\nCANDIDATE DOCUMENTS:\n${docsBlock}\n\nFor each document, evaluate: Does it contain CONCRETE EVIDENCE (specific facts, certifications, project references, metrics) that could be used to PROVE the company fulfills this requirement in a bid response? Score accordingly.`;
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",

@@ -8,8 +8,8 @@ const corsHeaders = {
 };
 
 const OPENAI_MODEL = "gpt-4o";
-const OPENAI_TIMEOUT_MS = 55000;
-const MAX_CONTEXT_CHARS = 30000;
+const OPENAI_TIMEOUT_MS = 90000;
+const MAX_CONTEXT_CHARS = 50000;
 const GOOD_MATCH_THRESHOLD = 20;
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -51,30 +51,40 @@ async function draftWithOpenAI(
     throw new Error("OPENAI_API_KEY secret is not configured");
   }
 
-  const systemPrompt = `You are a senior bid writer for a Swiss IT services company. Your task is to draft professional bid response sections based on tender requirements and the company's knowledge assets (reference projects, service descriptions, policies, CVs, etc.).
+  const systemPrompt = `You are a senior bid writer and compliance expert for a Swiss IT services company. Your task is to draft professional, factually accurate bid response sections based EXCLUSIVELY on the company's knowledge assets provided below.
 
-RULES:
-- Write in the SAME language as the requirements (German, English, French, or Italian)
-- Use a professional, confident but not arrogant tone
-- Reference specific knowledge assets when available (mention project names, certifications, etc.)
-- For requirements WITHOUT matching knowledge context, write a reasonable draft but flag it as needing attention
-- Keep each section focused and well-structured with bullet points or numbered lists where appropriate
-- Be specific and concrete, avoid generic filler text
+CRITICAL RULES — STRICT FACTUAL ACCURACY:
+1. NEVER invent, fabricate, or assume information that is not present in the provided knowledge context
+2. ONLY use facts, figures, project names, certifications, capabilities, and references that appear in the matched knowledge documents
+3. If a requirement has NO matching knowledge context, do NOT draft a speculative answer — instead add it to the "gaps" array with a clear explanation of what evidence is missing
+4. If a requirement has PARTIAL knowledge context (some relevant info but not enough to fully answer), draft only the parts you can substantiate and explicitly mark the rest as "[MANUELLE EINGABE ERFORDERLICH]" in the text, AND add it to gaps
+5. Write in the SAME language as the requirements (German, English, French, or Italian)
+6. Use a professional, confident but honest tone — it is better to acknowledge a gap than to fabricate an answer
+7. Reference specific knowledge assets by name (project names, certifications, document titles) — this builds credibility
+8. Keep each section focused and well-structured with bullet points or numbered lists where appropriate
+9. Be specific and concrete — cite actual numbers, dates, project names, and capabilities from the knowledge assets
+10. For mandatory requirements without coverage, clearly flag them as critical gaps
+
+QUALITY STANDARDS:
+- Every claim in the response must be traceable to a provided knowledge document
+- Prefer quoting specific evidence over making general statements
+- If multiple knowledge assets support a requirement, synthesize them coherently
+- Do not use generic filler text like "We have extensive experience in..." unless backed by specific evidence
 
 OUTPUT FORMAT (JSON):
 {
-  "executive_summary": "A 2-3 paragraph executive summary of the entire bid response, highlighting key strengths and differentiators",
+  "executive_summary": "A 2-3 paragraph executive summary based ONLY on substantiated strengths from the knowledge assets. Highlight key differentiators with concrete evidence.",
   "sections": [
     {
       "section_title": "Category Name",
-      "draft_text": "Drafted response text addressing all requirements in this category..."
+      "draft_text": "Drafted response text addressing requirements in this category, using only facts from knowledge assets. Mark any gaps with [MANUELLE EINGABE ERFORDERLICH]."
     }
   ],
   "gaps": [
     {
       "requirement_text": "The requirement that lacks coverage",
       "category": "technical",
-      "gap_reason": "Brief explanation of what knowledge/evidence is missing"
+      "gap_reason": "Specific explanation: what evidence/document/certification is needed to answer this requirement"
     }
   ]
 }
@@ -82,8 +92,10 @@ OUTPUT FORMAT (JSON):
 SECTION GUIDELINES:
 - Create one section per requirement category provided
 - Within each section, address each requirement individually
-- When knowledge context is provided, weave it naturally into the response
-- When NO knowledge context exists for a requirement, still draft a response but add it to the gaps array`;
+- When knowledge context is provided, weave it naturally into the response with specific references
+- When NO knowledge context exists: do NOT draft a response — add it to gaps with actionable gap_reason
+- When PARTIAL knowledge exists: draft what you can substantiate, mark the rest with [MANUELLE EINGABE ERFORDERLICH], and add to gaps
+- Every gap entry must have an actionable gap_reason explaining exactly what document/evidence the team needs to provide`;
 
   // Build the user prompt with all requirements and context
   let userPrompt = `TENDER: "${tenderTitle}"\n\n`;
@@ -108,7 +120,7 @@ SECTION GUIDELINES:
           userPrompt += `---\n${ctx}\n---\n`;
         }
       } else {
-        userPrompt += `[No matching knowledge assets found - draft based on general capabilities]\n`;
+        userPrompt += `[NO KNOWLEDGE ASSETS FOUND — Do NOT draft a response. Add this requirement to the gaps array.]\n`;
       }
     }
     userPrompt += "\n";
@@ -126,8 +138,8 @@ SECTION GUIDELINES:
       },
       body: JSON.stringify({
         model: OPENAI_MODEL,
-        temperature: 0.3,
-        max_tokens: 4096,
+        temperature: 0.15,
+        max_tokens: 8000,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
