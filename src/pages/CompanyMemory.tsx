@@ -7,8 +7,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { BookOpen, Upload, Search, X, FileText, Loader2, Database, Tag, FolderOpen, CheckCircle2, AlertCircle, Clock, RotateCw } from 'lucide-react';
+import { BookOpen, Upload, Search, X, FileText, Loader2, Database, Tag, FolderOpen, CheckCircle2, AlertCircle, Clock, RotateCw, Trash2 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
 import type { Tables } from '@/integrations/supabase/types';
@@ -69,6 +79,8 @@ export default function CompanyMemory() {
   const [submitting, setSubmitting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [reprocessingIds, setReprocessingIds] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<KnowledgeAsset | null>(null);
+  const [deletingAsset, setDeletingAsset] = useState(false);
 
   const loadAssets = async () => {
     const { data } = await supabase.from('knowledge_assets').select('*').order('created_at', { ascending: false });
@@ -101,6 +113,25 @@ export default function CompanyMemory() {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
       setReprocessingIds(prev => { const next = new Set(prev); next.delete(assetId); return next; });
+    }
+  };
+
+  const handleDeleteAsset = async () => {
+    if (!deleteTarget) return;
+    setDeletingAsset(true);
+    try {
+      if (deleteTarget.storage_path) {
+        await supabase.storage.from('knowledge-assets').remove([deleteTarget.storage_path]);
+      }
+      const { error } = await supabase.from('knowledge_assets').delete().eq('id', deleteTarget.id);
+      if (error) throw error;
+      setAssets(prev => prev.filter(a => a.id !== deleteTarget.id));
+      toast({ title: t('memory.assetDeleted') });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeletingAsset(false);
+      setDeleteTarget(null);
     }
   };
 
@@ -332,7 +363,13 @@ export default function CompanyMemory() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map(asset => (
-            <div key={asset.id} className="glass-card p-5 hover:border-primary/20 transition-colors group">
+            <div key={asset.id} className="glass-card p-5 hover:border-primary/20 transition-colors group relative">
+              <button
+                onClick={() => setDeleteTarget(asset)}
+                className="absolute top-3 right-3 text-muted-foreground hover:text-destructive transition-colors p-1.5 rounded hover:bg-destructive/10 opacity-0 group-hover:opacity-100"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
               <div className="flex items-start gap-3">
                 <span className="text-xl">{typeIcons[asset.asset_type] || '📎'}</span>
                 <div className="min-w-0 flex-1">
@@ -382,6 +419,30 @@ export default function CompanyMemory() {
           ))}
         </div>
       )}
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('memory.deleteAsset')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-medium text-foreground">{deleteTarget?.title}</span>
+              <br /><br />
+              {t('memory.deleteAssetConfirm')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingAsset}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteAsset}
+              disabled={deletingAsset}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingAsset && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              {t('memory.deleteAsset')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
