@@ -30,9 +30,9 @@ serve(async (req: Request) => {
 
   try {
     const { query, cantons, lastItem } = await req.json();
-    if (!query || typeof query !== "string") {
+    if (!query || typeof query !== "string" || query.trim().length < 3) {
       return new Response(
-        JSON.stringify({ error: "query is required" }),
+        JSON.stringify({ error: "query must be at least 3 characters" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -60,7 +60,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Build SIMAP search URL
+    // Build SIMAP search URL — try endpoint paths in order
     const params = new URLSearchParams();
     params.set("search", query);
     if (cantons && Array.isArray(cantons)) {
@@ -70,18 +70,40 @@ serve(async (req: Request) => {
       params.set("lastItem", lastItem);
     }
 
-    const url = `${SIMAP_API_BASE}/public/v1/projects/search?${params.toString()}`;
-    console.log(`[search-simap] Fetching: ${url}`);
+    const endpoints = [
+      `${SIMAP_API_BASE}/publications/v2/project/project-search`,
+      `${SIMAP_API_BASE}/projects/v1/search`,
+    ];
 
-    const simapResp = await fetch(url, {
-      headers: { "Accept": "application/json" },
-    });
+    let simapResp: Response | null = null;
+    let lastErr = "";
 
-    if (!simapResp.ok) {
-      const errText = await simapResp.text();
-      console.error(`[search-simap] SIMAP API error ${simapResp.status}: ${errText}`);
+    for (const base of endpoints) {
+      const url = `${base}?${params.toString()}`;
+      console.log(`[search-simap] Trying: ${url}`);
+
+      const resp = await fetch(url, {
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+        },
+      });
+
+      console.log(`[search-simap] ${url} → ${resp.status}`);
+
+      if (resp.ok) {
+        simapResp = resp;
+        break;
+      }
+
+      const errText = await resp.text();
+      console.error(`[search-simap] ${resp.status}: ${errText.substring(0, 500)}`);
+      lastErr = `${resp.status}: ${errText.substring(0, 200)}`;
+    }
+
+    if (!simapResp) {
       return new Response(
-        JSON.stringify({ error: `SIMAP API error: ${simapResp.status}` }),
+        JSON.stringify({ error: `SIMAP API error: ${lastErr}` }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }

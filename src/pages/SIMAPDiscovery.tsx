@@ -36,7 +36,7 @@ export default function SIMAPDiscovery() {
 
   const handleSearch = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!query.trim()) return;
+    if (query.trim().length < 3) return;
     setSearching(true);
     setSearched(true);
     try {
@@ -122,7 +122,7 @@ export default function SIMAPDiscovery() {
               className="pl-10"
             />
           </div>
-          <Button type="submit" disabled={searching || !query.trim()} className="shrink-0">
+          <Button type="submit" disabled={searching || query.trim().length < 3} className="shrink-0">
             {searching ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin mr-1.5" />

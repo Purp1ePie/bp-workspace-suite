@@ -82,22 +82,40 @@ serve(async (req: Request) => {
       );
     }
 
-    // Search SIMAP for this specific project
-    const params = new URLSearchParams();
-    params.set("search", projectId);
+    // Try direct project header endpoint first, then search
+    const headers = {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+    };
 
-    const url = `${SIMAP_API_BASE}/public/v1/projects/search?${params.toString()}`;
-    console.log(`[fetch-simap] Fetching: ${url}`);
+    const endpoints = [
+      `${SIMAP_API_BASE}/publications/v2/project/${projectId}/project-header`,
+      `${SIMAP_API_BASE}/projects/v1/${projectId}`,
+      `${SIMAP_API_BASE}/publications/v2/project/project-search?search=${encodeURIComponent(projectId)}`,
+      `${SIMAP_API_BASE}/projects/v1/search?search=${encodeURIComponent(projectId)}`,
+    ];
 
-    const simapResp = await fetch(url, {
-      headers: { "Accept": "application/json" },
-    });
+    let simapResp: Response | null = null;
+    let lastErr = "";
 
-    if (!simapResp.ok) {
-      const errText = await simapResp.text();
-      console.error(`[fetch-simap] SIMAP API error ${simapResp.status}: ${errText}`);
+    for (const url of endpoints) {
+      console.log(`[fetch-simap] Trying: ${url}`);
+      const resp = await fetch(url, { headers });
+      console.log(`[fetch-simap] ${url} → ${resp.status}`);
+
+      if (resp.ok) {
+        simapResp = resp;
+        break;
+      }
+
+      const errText = await resp.text();
+      console.error(`[fetch-simap] ${resp.status}: ${errText.substring(0, 500)}`);
+      lastErr = `${resp.status}: ${errText.substring(0, 200)}`;
+    }
+
+    if (!simapResp) {
       return new Response(
-        JSON.stringify({ error: `SIMAP API error: ${simapResp.status}` }),
+        JSON.stringify({ error: `SIMAP API error: ${lastErr}` }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -105,12 +123,23 @@ serve(async (req: Request) => {
     const data = await simapResp.json();
     console.log(`[fetch-simap] Response keys:`, Object.keys(data));
 
-    const projects = data.projects || data.results || [];
+    // Data could be a single project (from project-header) or a search result
+    let projects: any[];
+    if (Array.isArray(data.projects)) {
+      projects = data.projects;
+    } else if (Array.isArray(data.results)) {
+      projects = data.results;
+    } else if (data.id || data.projectId || data.title) {
+      // Single project response from project-header endpoint
+      projects = [data];
+    } else {
+      projects = [];
+    }
 
     // Find the exact project match
     let project = projects.find((p: any) => (p.id || p.projectId) === projectId);
     if (!project && projects.length > 0) {
-      project = projects[0]; // Fallback to first result
+      project = projects[0];
     }
 
     if (!project) {

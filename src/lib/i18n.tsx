@@ -240,7 +240,7 @@ const translations = {
   // Discovery page
   'discover.title': { de: 'SIMAP Entdecken', en: 'SIMAP Discovery' },
   'discover.subtitle': { de: 'Öffentliche Ausschreibungen aus SIMAP durchsuchen und importieren', en: 'Search and import public tenders from SIMAP' },
-  'discover.searchPlaceholder': { de: 'Suchbegriff eingeben, z.B. IT, Beratung...', en: 'Enter search term, e.g. IT, consulting...' },
+  'discover.searchPlaceholder': { de: 'Suchbegriff eingeben (mind. 3 Zeichen)', en: 'Enter search term (min. 3 characters)' },
   'discover.search': { de: 'Suchen', en: 'Search' },
   'discover.searching': { de: 'Suche läuft...', en: 'Searching...' },
   'discover.noResults': { de: 'Keine Ergebnisse', en: 'No results' },
