@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import {
   FolderPlus, Clock, Upload, BarChart3, ArrowRight,
   Folders, CalendarClock, FileText, CheckSquare,
+  Gauge, Target, Users, TrendingUp,
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
@@ -19,22 +20,44 @@ type TenderDocument = Tables<'tender_documents'>;
 type Deadline = Tables<'deadlines'>;
 type ChecklistItem = Tables<'checklist_items'>;
 
+interface MemberSlim {
+  id: string;
+  full_name: string | null;
+  role_name: string | null;
+}
+
 export default function Dashboard() {
   const { t, language } = useI18n();
   const { user } = useAuth();
   const [tenders, setTenders] = useState<Tender[]>([]);
   const [deadlines, setDeadlines] = useState<(Deadline & { tender_title?: string })[]>([]);
   const [recentDocs, setRecentDocs] = useState<(TenderDocument & { tender_title?: string })[]>([]);
-  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
+  const [openChecklistItems, setOpenChecklistItems] = useState<ChecklistItem[]>([]);
+  const [allChecklistItems, setAllChecklistItems] = useState<ChecklistItem[]>([]);
+  const [members, setMembers] = useState<MemberSlim[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      const [tendersRes, deadlinesRes, docsRes, checkRes] = await Promise.all([
-        supabase.from('tenders').select('*').order('created_at', { ascending: false }).limit(50),
-        supabase.from('deadlines').select('*').order('due_at', { ascending: true }).limit(8),
+      if (!user) { setLoading(false); return; }
+
+      // Get current user's org
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+      const orgId = profile?.organization_id;
+
+      const [tendersRes, deadlinesRes, docsRes, openCheckRes, allCheckRes, membersRes] = await Promise.all([
+        supabase.from('tenders').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('deadlines').select('*').order('due_at', { ascending: true }).limit(20),
         supabase.from('tender_documents').select('*').order('created_at', { ascending: false }).limit(5),
         supabase.from('checklist_items').select('*').eq('status', 'open').order('due_at', { ascending: true }).limit(8),
+        supabase.from('checklist_items').select('*').order('created_at', { ascending: true }).limit(500),
+        orgId
+          ? supabase.from('profiles').select('id, full_name, role_name').eq('organization_id', orgId).order('full_name')
+          : Promise.resolve({ data: [] as MemberSlim[] }),
       ]);
 
       const tendersList = tendersRes.data || [];
@@ -52,11 +75,13 @@ export default function Dashboard() {
         tender_title: tenderMap.get(d.tender_id) || '',
       })));
 
-      setChecklistItems(checkRes.data || []);
+      setOpenChecklistItems(openCheckRes.data || []);
+      setAllChecklistItems(allCheckRes.data || []);
+      setMembers((membersRes.data as MemberSlim[]) || []);
       setLoading(false);
     };
     load();
-  }, []);
+  }, [user]);
 
   const activeTenders = tenders.filter(t => ['new', 'in_progress'].includes(t.status));
   const dateFnsLocale = language === 'de' ? de : enUS;
@@ -66,6 +91,62 @@ export default function Dashboard() {
     return acc;
   }, {});
 
+  // Pipeline stages
+  const pipelineCounts = useMemo(() => {
+    const stages = [
+      { key: 'draft', statuses: ['new', 'draft'], label: t('dashboard.stageDraft'), color: 'bg-muted' },
+      { key: 'in_progress', statuses: ['in_progress', 'analyzing'], label: t('dashboard.stageInProgress'), color: 'bg-warning/15' },
+      { key: 'review', statuses: ['review', 'in_review', 'ready_for_review'], label: t('dashboard.stageReview'), color: 'bg-primary/15' },
+      { key: 'submitted', statuses: ['submitted'], label: t('dashboard.stageSubmitted'), color: 'bg-info/15' },
+      { key: 'decided', statuses: ['won', 'lost'], label: t('dashboard.stageDecided'), color: 'bg-success/15' },
+    ];
+    return stages.map(stage => ({
+      ...stage,
+      count: tenders.filter(t => stage.statuses.includes(t.status)).length,
+    }));
+  }, [tenders, t]);
+
+  // Win/Loss
+  const wonTenders = tenders.filter(t => t.status === 'won');
+  const lostTenders = tenders.filter(t => t.status === 'lost');
+  const winRate = (wonTenders.length + lostTenders.length) > 0
+    ? Math.round((wonTenders.length / (wonTenders.length + lostTenders.length)) * 100)
+    : null;
+  const avgFitWon = wonTenders.length > 0
+    ? Math.round(wonTenders.filter(t => t.fit_score != null).reduce((sum, t) => sum + (t.fit_score ?? 0), 0) / (wonTenders.filter(t => t.fit_score != null).length || 1))
+    : null;
+  const avgFitLost = lostTenders.length > 0
+    ? Math.round(lostTenders.filter(t => t.fit_score != null).reduce((sum, t) => sum + (t.fit_score ?? 0), 0) / (lostTenders.filter(t => t.fit_score != null).length || 1))
+    : null;
+
+  // Team workload
+  const teamWorkload = useMemo(() => {
+    const openItems = allChecklistItems.filter(c => c.status !== 'done');
+    return members.map(m => ({
+      id: m.id,
+      name: m.full_name || '—',
+      role: m.role_name,
+      openTasks: openItems.filter(c => c.owner_profile_id === m.id).length,
+      doneTasks: allChecklistItems.filter(c => c.owner_profile_id === m.id && c.status === 'done').length,
+    })).sort((a, b) => b.openTasks - a.openTasks);
+  }, [members, allChecklistItems]);
+
+  // Enhanced KPIs
+  const activeTendersForKpi = tenders.filter(t => ['new', 'in_progress', 'analyzing', 'draft', 'review', 'ready_for_review'].includes(t.status));
+  const tendersWithFit = activeTendersForKpi.filter(t => t.fit_score != null);
+  const avgFitScore = tendersWithFit.length > 0
+    ? Math.round(tendersWithFit.reduce((sum, t) => sum + (t.fit_score ?? 0), 0) / tendersWithFit.length)
+    : null;
+  const now = new Date();
+  const overdueDeadlines = deadlines.filter(d => new Date(d.due_at) < now).length;
+  const dueThisWeek = deadlines.filter(d => {
+    const due = new Date(d.due_at);
+    const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    return due >= now && due <= weekFromNow;
+  }).length;
+  const bidDecisionsMade = tenders.filter(t => t.bid_decision).length;
+  const bidDecisionsPending = activeTendersForKpi.filter(t => !t.bid_decision && t.fit_score != null).length;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -74,11 +155,12 @@ export default function Dashboard() {
     );
   }
 
-  const statCards = [
+  const statCards: Array<{ label: string; value: string | number; icon: any; color: string; detail?: string }> = [
     { label: t('dashboard.totalTenders'), value: tenders.length, icon: Folders, color: 'text-primary' },
-    { label: t('dashboard.pendingDeadlines'), value: deadlines.length, icon: CalendarClock, color: 'text-warning' },
-    { label: t('dashboard.documentsUploaded'), value: recentDocs.length, icon: FileText, color: 'text-info' },
-    { label: t('dashboard.openItems'), value: checklistItems.length, icon: CheckSquare, color: 'text-destructive' },
+    { label: t('dashboard.avgFitScore'), value: avgFitScore != null ? `${avgFitScore}%` : '—', icon: Gauge, color: 'text-primary' },
+    { label: t('dashboard.deadlineUrgency'), value: overdueDeadlines, icon: CalendarClock, color: overdueDeadlines > 0 ? 'text-destructive' : 'text-warning',
+      detail: dueThisWeek > 0 ? `${dueThisWeek} ${t('dashboard.dueThisWeek')}` : undefined },
+    { label: t('dashboard.bidDecisions'), value: `${bidDecisionsMade}/${bidDecisionsMade + bidDecisionsPending}`, icon: Target, color: 'text-info' },
   ];
 
   return (
@@ -106,8 +188,112 @@ export default function Dashboard() {
               <span className="text-2xl font-bold font-heading">{stat.value}</span>
             </div>
             <p className="text-xs text-muted-foreground mt-2">{stat.label}</p>
+            {stat.detail && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{stat.detail}</p>}
           </div>
         ))}
+      </div>
+
+      {/* Pipeline View */}
+      {tenders.length > 0 && (
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 className="h-4 w-4 text-primary" />
+            <h2 className="font-semibold font-heading text-sm">{t('dashboard.pipeline')}</h2>
+          </div>
+          <div className="flex items-stretch gap-0">
+            {pipelineCounts.map((stage, i) => (
+              <div key={stage.key} className="contents">
+                <div className={`flex-1 text-center p-3 rounded-lg ${stage.color} border border-border/30`}>
+                  <p className="text-xl font-bold font-heading">{stage.count}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{stage.label}</p>
+                </div>
+                {i < pipelineCounts.length - 1 && (
+                  <div className="flex items-center px-1">
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40" />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Win/Loss & Team Workload row */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Win/Loss Tracking */}
+        <div className="glass-card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp className="h-4 w-4 text-success" />
+            <h2 className="font-semibold font-heading text-sm">{t('dashboard.winLoss')}</h2>
+          </div>
+          {(wonTenders.length + lostTenders.length) === 0 ? (
+            <p className="text-xs text-muted-foreground py-4 text-center">{t('dashboard.noWinLossData')}</p>
+          ) : (
+            <div className="space-y-4">
+              {/* Win rate gauge */}
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <div className="flex justify-between text-xs mb-1.5">
+                    <span className="text-success font-medium">{wonTenders.length} {t('status.won')}</span>
+                    <span className="text-destructive font-medium">{lostTenders.length} {t('status.lost')}</span>
+                  </div>
+                  <div className="h-3 rounded-full bg-destructive/20 overflow-hidden">
+                    <div
+                      className="h-full bg-success rounded-full transition-all"
+                      style={{ width: `${winRate}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="text-2xl font-bold font-heading text-success">{winRate}%</span>
+              </div>
+              {/* Avg fit scores comparison */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="text-center p-3 rounded-lg bg-success/5 border border-success/20">
+                  <p className="text-lg font-bold font-heading text-success">{avgFitWon ?? '—'}%</p>
+                  <p className="text-[10px] text-muted-foreground">{t('dashboard.avgFitWon')}</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-destructive/5 border border-destructive/20">
+                  <p className="text-lg font-bold font-heading text-destructive">{avgFitLost ?? '—'}%</p>
+                  <p className="text-[10px] text-muted-foreground">{t('dashboard.avgFitLost')}</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Team Workload */}
+        <div className="glass-card">
+          <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold font-heading text-sm">{t('dashboard.teamWorkload')}</h2>
+            </div>
+            <Link to="/team" className="text-xs text-primary hover:underline">{t('dashboard.viewAll')}</Link>
+          </div>
+          {teamWorkload.length === 0 ? (
+            <EmptyState icon={Users} title={t('dashboard.noTeamData')} />
+          ) : (
+            <div className="divide-y divide-border">
+              {teamWorkload.slice(0, 5).map((member) => (
+                <div key={member.id} className="px-5 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+                      {member.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{member.name}</p>
+                      {member.role && <p className="text-[10px] text-muted-foreground">{member.role}</p>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0 ml-3">
+                    <span className="text-xs text-warning font-medium">{member.openTasks} {t('team.tasksOpen')}</span>
+                    <span className="text-xs text-success font-medium">{member.doneTasks} {t('team.tasksDone')}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Bid Status Summary */}
@@ -162,6 +348,9 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground mt-0.5">{tender.issuer || '—'}</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 ml-3">
+                    {tender.fit_score != null && (
+                      <span className="text-xs font-medium text-primary">{tender.fit_score}%</span>
+                    )}
                     <StatusBadge status={tender.status} />
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
                   </div>
@@ -185,7 +374,7 @@ export default function Dashboard() {
                 <div key={dl.id} className="px-5 py-3">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">{dl.deadline_type}</p>
-                    <span className="text-xs font-medium text-warning">
+                    <span className={`text-xs font-medium ${new Date(dl.due_at) < now ? 'text-destructive' : 'text-warning'}`}>
                       {formatDistanceToNow(new Date(dl.due_at), { addSuffix: true, locale: dateFnsLocale })}
                     </span>
                   </div>
@@ -205,11 +394,11 @@ export default function Dashboard() {
             </div>
             <Link to="/checklist" className="text-xs text-primary hover:underline">{t('dashboard.viewAll')}</Link>
           </div>
-          {checklistItems.length === 0 ? (
+          {openChecklistItems.length === 0 ? (
             <EmptyState icon={CheckSquare} title={t('dashboard.noChecklist')} />
           ) : (
             <div className="divide-y divide-border">
-              {checklistItems.slice(0, 5).map((item) => (
+              {openChecklistItems.slice(0, 5).map((item) => (
                 <div key={item.id} className="px-5 py-3 flex items-center gap-3">
                   <div className="h-4 w-4 rounded border border-border shrink-0" />
                   <div className="min-w-0 flex-1">

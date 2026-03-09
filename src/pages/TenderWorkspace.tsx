@@ -308,6 +308,22 @@ export default function TenderWorkspace() {
     }
   };
 
+  const handleBidDecision = async (decision: 'bid' | 'no_bid') => {
+    if (!id || !tender) return;
+    const newDecision = tender.bid_decision === decision ? null : decision;
+    const { error } = await supabase
+      .from('tenders')
+      .update({ bid_decision: newDecision })
+      .eq('id', id);
+    if (error) {
+      toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
+    } else {
+      setTender(prev => prev ? { ...prev, bid_decision: newDecision } : prev);
+      logActivity('bid_decision_changed', { decision: newDecision });
+      toast({ title: t('workspace.bidDecisionSaved') });
+    }
+  };
+
   const handleUpdateMatchStatus = async (matchId: string, status: 'accepted' | 'rejected') => {
     const { error } = await supabase.from('requirement_matches').update({ status }).eq('id', matchId);
     if (error) {
@@ -679,6 +695,33 @@ export default function TenderWorkspace() {
   const fitScoreColor = (tender.fit_score ?? 0) >= 70 ? 'text-success' : (tender.fit_score ?? 0) >= 40 ? 'text-warning' : 'text-destructive';
   const hasExcelDoc = docs.some(d => (d.file_name || '').toLowerCase().endsWith('.xlsx'));
 
+  // Composite readiness score
+  const knowledgeFit = tender.fit_score ?? 0;
+  const requirementsCoverage = requirements.length > 0 ? Math.round((matchedReqIds.size / requirements.length) * 100) : 0;
+  const riskPenalty = Math.min(30, highRisks * 10);
+  const readinessScore = Math.max(0, Math.min(100, Math.round(
+    (knowledgeFit * 0.35) + (requirementsCoverage * 0.30) + (checklistProgress * 0.25) + ((100 - riskPenalty) * 0.10)
+  )));
+  const readinessColor = readinessScore >= 70 ? 'text-success' : readinessScore >= 40 ? 'text-warning' : 'text-destructive';
+
+  // Bid recommendation factors
+  const deadlineDays = tender.deadline
+    ? Math.ceil((new Date(tender.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : null;
+  const proFactors: string[] = [];
+  const conFactors: string[] = [];
+  if (knowledgeFit >= 60) proFactors.push(t('workspace.bidPro.goodFit'));
+  else conFactors.push(t('workspace.bidCon.lowFit'));
+  if (requirementsCoverage >= 70) proFactors.push(t('workspace.bidPro.goodCoverage'));
+  else if (requirementsCoverage < 40) conFactors.push(t('workspace.bidCon.lowCoverage'));
+  if (highRisks === 0) proFactors.push(t('workspace.bidPro.noHighRisks'));
+  else conFactors.push(t('workspace.bidCon.highRisks').replace('{n}', String(highRisks)));
+  if (deadlineDays !== null && deadlineDays < 7) conFactors.push(t('workspace.bidCon.deadlineUrgent'));
+  else if (deadlineDays !== null && deadlineDays > 14) proFactors.push(t('workspace.bidPro.timeAvailable'));
+  const aiRecommendation: 'bid' | 'no_bid' | 'neutral' =
+    readinessScore >= 60 && conFactors.length <= 1 ? 'bid' :
+    readinessScore < 30 || conFactors.length >= 3 ? 'no_bid' : 'neutral';
+
   return (
     <div className="animate-fade-in">
       {/* Header */}
@@ -846,24 +889,117 @@ export default function TenderWorkspace() {
                   <Gauge className="h-4 w-4 text-primary" />
                   <h3 className="font-heading font-semibold text-sm">Fit Score & Readiness</h3>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-4">
                   <div className="text-center p-4 rounded-lg bg-muted/50">
                     <p className={`text-3xl font-bold font-heading ${fitScoreColor}`}>{tender.fit_score}%</p>
-                    <p className="text-xs text-muted-foreground mt-1">Knowledge Fit</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t('workspace.fitScore')}</p>
                   </div>
                   <div className="text-center p-4 rounded-lg bg-muted/50">
                     <p className="text-3xl font-bold font-heading text-foreground">
-                      {requirements.length > 0 ? Math.round((matchedReqIds.size / requirements.length) * 100) : 0}%
+                      {requirementsCoverage}%
                     </p>
-                    <p className="text-xs text-muted-foreground mt-1">Requirements Covered</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t('workspace.requirements')}</p>
                   </div>
                   <div className="text-center p-4 rounded-lg bg-muted/50">
                     <p className="text-3xl font-bold font-heading text-foreground">{checklistProgress}%</p>
-                    <p className="text-xs text-muted-foreground mt-1">Checklist Complete</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t('workspace.checklist')}</p>
+                  </div>
+                  <div className="text-center p-4 rounded-lg bg-muted/50">
+                    <p className={`text-3xl font-bold font-heading ${readinessColor}`}>{readinessScore}%</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t('workspace.readinessScore')}</p>
                   </div>
                 </div>
               </div>
             )}
+
+            {/* Bid Decision */}
+            <div className="glass-card p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Target className="h-4 w-4 text-primary" />
+                <h3 className="font-heading font-semibold text-sm">{t('workspace.bidDecision')}</h3>
+                {tender.bid_decision && (
+                  <span className={`ml-auto text-xs font-medium px-2.5 py-0.5 rounded-full ${
+                    tender.bid_decision === 'bid' ? 'bg-success/15 text-success' : 'bg-destructive/15 text-destructive'
+                  }`}>
+                    {tender.bid_decision === 'bid' ? t('workspace.bidDecisionBid') : t('workspace.bidDecisionNoBid')}
+                  </span>
+                )}
+              </div>
+
+              {/* AI Recommendation */}
+              {tender.fit_score != null && (
+                <div className={`rounded-lg p-3 mb-4 ${
+                  aiRecommendation === 'bid' ? 'bg-success/5 border border-success/20' :
+                  aiRecommendation === 'no_bid' ? 'bg-destructive/5 border border-destructive/20' :
+                  'bg-muted/50 border border-border'
+                }`}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-xs font-semibold">{t('workspace.aiRecommendation')}</span>
+                    <span className={`text-xs font-medium ${
+                      aiRecommendation === 'bid' ? 'text-success' : aiRecommendation === 'no_bid' ? 'text-destructive' : 'text-muted-foreground'
+                    }`}>
+                      {aiRecommendation === 'bid' ? t('workspace.recommendBid') :
+                       aiRecommendation === 'no_bid' ? t('workspace.recommendNoBid') :
+                       t('workspace.recommendNeutral')}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t('workspace.readinessScore')}: {readinessScore}% | {t('workspace.fitScore')}: {knowledgeFit}%
+                  </p>
+                </div>
+              )}
+
+              {/* Pros/Cons */}
+              {(proFactors.length > 0 || conFactors.length > 0) && (
+                <div className="grid sm:grid-cols-2 gap-3 mb-4">
+                  {proFactors.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-success">{t('workspace.bidPros')}</p>
+                      {proFactors.map((f, i) => (
+                        <div key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                          <CheckCircle2 className="h-3 w-3 text-success shrink-0 mt-0.5" />
+                          <span>{f}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {conFactors.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-destructive">{t('workspace.bidCons')}</p>
+                      {conFactors.map((f, i) => (
+                        <div key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                          <XCircle className="h-3 w-3 text-destructive shrink-0 mt-0.5" />
+                          <span>{f}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Decision buttons */}
+              <div className="flex gap-3">
+                <Button
+                  size="sm"
+                  variant={tender.bid_decision === 'bid' ? 'default' : 'outline'}
+                  className={`flex-1 ${tender.bid_decision === 'bid' ? 'bg-success hover:bg-success/90 text-white' : 'border-success/30 text-success hover:bg-success/10'}`}
+                  onClick={() => handleBidDecision('bid')}
+                >
+                  <ThumbsUp className="h-3.5 w-3.5 mr-1.5" />
+                  {t('workspace.bidDecisionBid')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={tender.bid_decision === 'no_bid' ? 'default' : 'outline'}
+                  className={`flex-1 ${tender.bid_decision === 'no_bid' ? 'bg-destructive hover:bg-destructive/90 text-white' : 'border-destructive/30 text-destructive hover:bg-destructive/10'}`}
+                  onClick={() => handleBidDecision('no_bid')}
+                >
+                  <ThumbsDown className="h-3.5 w-3.5 mr-1.5" />
+                  {t('workspace.bidDecisionNoBid')}
+                </Button>
+              </div>
+            </div>
 
             {/* Coverage Gaps */}
             {unmatchedReqs.length > 0 && requirements.length > 0 && (
