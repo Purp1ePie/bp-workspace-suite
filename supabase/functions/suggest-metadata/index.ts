@@ -146,7 +146,7 @@ async function callOpenAI(systemPrompt: string, userContent: string): Promise<an
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       temperature: 0.1,
       response_format: { type: "json_object" },
       messages: [
@@ -154,7 +154,7 @@ async function callOpenAI(systemPrompt: string, userContent: string): Promise<an
         { role: "user", content: userContent },
       ],
     }),
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!response.ok) {

@@ -9,12 +9,12 @@ const corsHeaders = {
 // ── Config ─────────────────────────────────────────────────────────
 
 const EMBEDDING_MODEL = "text-embedding-3-large";
-const LLM_MODEL = "gpt-4o-mini";
+const LLM_MODEL = "gpt-4o";
 const MAX_ASSET_TEXT_FOR_EMBEDDING = 2000;
-const MAX_ASSET_TEXT_FOR_LLM = 800;
-const EMBEDDING_PRE_FILTER = 0.30; // loose pre-filter — let candidates through
-const MAX_CANDIDATES_PER_REQ = 5;  // top N from embeddings → LLM
-const LLM_MIN_SCORE = 50;          // LLM must score >= 50 to be a real match
+const MAX_ASSET_TEXT_FOR_LLM = 1200;
+const EMBEDDING_PRE_FILTER = 0.20; // looser pre-filter — let more candidates through
+const MAX_CANDIDATES_PER_REQ = 8;  // top N from embeddings → LLM
+const LLM_MIN_SCORE = 40;          // lower threshold — let borderline matches through
 const MAX_MATCHES_PER_REQ = 3;     // final top N per requirement
 
 // ── Embedding helpers ──────────────────────────────────────────────
@@ -125,14 +125,14 @@ Return ONLY a valid JSON object: {"scores": [{"asset_id": "...", "score": N, "re
     body: JSON.stringify({
       model: LLM_MODEL,
       temperature: 0.1,
-      max_tokens: 500,
+      max_tokens: 1000,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
     }),
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!resp.ok) {

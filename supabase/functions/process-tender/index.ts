@@ -700,8 +700,8 @@ serve(async (req) => {
         const meta = extraction.tender_metadata;
         if (meta) {
           const updates: Record<string, unknown> = {};
-          // Only fill fields that are currently empty/default on the tender
-          if (meta.title && (!tender.title || tender.title === "Untitled Tender" || tender.title === "Neue Ausschreibung")) {
+          // Always update title from AI extraction — AI-detected title is more accurate
+          if (meta.title) {
             updates.title = meta.title;
           }
           if (meta.issuer) {

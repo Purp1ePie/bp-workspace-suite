@@ -9,8 +9,8 @@ const corsHeaders = {
 };
 
 const OPENAI_MODEL = "gpt-4o";
-const OPENAI_TIMEOUT_MS = 55000;
-const MAX_CELL_CONTEXT_CHARS = 30000;
+const OPENAI_TIMEOUT_MS = 90000;
+const MAX_CELL_CONTEXT_CHARS = 80000;
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -24,6 +24,7 @@ interface SheetStructure {
   sheetName: string;
   sheetPath: string;
   cells: CellInfo[];
+  maxCol: string; // highest column letter used (e.g. "F")
 }
 
 interface CellMapping {
@@ -50,6 +51,18 @@ function colToIndex(col: string): number {
     index = index * 26 + (col.charCodeAt(i) - 64);
   }
   return index - 1;
+}
+
+/** 0-based index to column letter: 0=A, 1=B, ..., 25=Z, 26=AA */
+function indexToCol(index: number): string {
+  let col = "";
+  let n = index + 1;
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
+    col = String.fromCharCode(65 + remainder) + col;
+    n = Math.floor((n - 1) / 26);
+  }
+  return col;
 }
 
 /** Parse cell ref like "B5" into {col: "B", row: 5} */
@@ -163,6 +176,19 @@ function getSheetNames(xmlBytes: Uint8Array): string[] {
 }
 
 /**
+ * Find the highest column letter used in a set of cells.
+ */
+function findMaxColumn(cells: CellInfo[]): string {
+  let maxIdx = 0;
+  for (const cell of cells) {
+    const { col } = parseCellRef(cell.ref);
+    const idx = colToIndex(col);
+    if (idx > maxIdx) maxIdx = idx;
+  }
+  return indexToCol(maxIdx);
+}
+
+/**
  * Build a text representation of the sheet structure for GPT-4o.
  * Format: one line per cell, "SheetName!CellRef: value"
  */
@@ -171,7 +197,7 @@ function buildCellContext(sheets: SheetStructure[]): string {
   let totalChars = 0;
 
   for (const sheet of sheets) {
-    lines.push(`\n=== Sheet: ${sheet.sheetName} ===`);
+    lines.push(`\n=== Sheet: ${sheet.sheetName} (last data column: ${sheet.maxCol}, answer column: ${indexToCol(colToIndex(sheet.maxCol) + 1)}) ===`);
 
     // Group by row for readability
     const byRow = new Map<number, CellInfo[]>();
@@ -255,13 +281,31 @@ function modifyWorksheetXml(
     } else {
       // Cell doesn't exist — insert into the correct row
       const { row } = parseCellRef(cellRef);
-      const rowOpenRegex = new RegExp(`(<row[^>]*?r="${row}"[^>]*>)`);
+      // Try matching row by r="N" attribute
+      const rowOpenRegex = new RegExp(`(<row[^>]*?\\br="${row}"[^>]*>)`);
       if (rowOpenRegex.test(modified)) {
         modified = modified.replace(rowOpenRegex, `$1${inlineContent}`);
       } else {
-        // Row doesn't exist — add new row before </sheetData>
-        const newRow = `<row r="${row}">${inlineContent}</row>`;
-        modified = modified.replace("</sheetData>", `${newRow}</sheetData>`);
+        // Try matching by row number in spans attribute or just any row with the number
+        const rowLooseRegex = new RegExp(`(<row\\s[^>]*>)`, "g");
+        let found = false;
+        const rowMatches = [...modified.matchAll(/<row[\s>][^]*?<\/row>/g)];
+        for (const rm of rowMatches) {
+          const rAttr = rm[0].match(/\br="(\d+)"/);
+          if (rAttr && rAttr[1] === String(row)) {
+            const rowOpen = rm[0].match(/<row[^>]*>/);
+            if (rowOpen) {
+              modified = modified.replace(rowOpen[0], rowOpen[0] + inlineContent);
+              found = true;
+              break;
+            }
+          }
+        }
+        if (!found) {
+          // Row doesn't exist — add new row before </sheetData>
+          const newRow = `<row r="${row}">${inlineContent}</row>`;
+          modified = modified.replace("</sheetData>", `${newRow}</sheetData>`);
+        }
       }
     }
   }
@@ -269,11 +313,39 @@ function modifyWorksheetXml(
   return modified;
 }
 
+// ── Text matching helpers ────────────────────────────────────────────
+
+/**
+ * Normalize text for comparison: lowercase, remove punctuation, collapse spaces.
+ */
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s\u00e4\u00f6\u00fc\u00e0\u00e8\u00e9\u00e2\u00ea\u00ee\u00f4\u00fb]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Compute token overlap between two texts (Jaccard-like score 0..1).
+ */
+function textOverlap(a: string, b: string): number {
+  const tokensA = new Set(normalizeText(a).split(" ").filter(t => t.length > 2));
+  const tokensB = new Set(normalizeText(b).split(" ").filter(t => t.length > 2));
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let intersection = 0;
+  for (const t of tokensA) {
+    if (tokensB.has(t)) intersection++;
+  }
+  return intersection / Math.min(tokensA.size, tokensB.size);
+}
+
 // ── OpenAI cell mapping ──────────────────────────────────────────────
 
 async function mapResponsesToCells(
   cellContext: string,
   responseSections: Array<{ section_title: string; draft_text: string | null }>,
+  requirements: Array<{ text: string; category: string }>,
   tenderTitle: string,
 ): Promise<MappingResult> {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
@@ -281,32 +353,48 @@ async function mapResponsesToCells(
     throw new Error("OPENAI_API_KEY secret is not configured");
   }
 
-  const systemPrompt = `You are an expert at filling in RFP (Request for Proposal) Excel templates. Given:
+  const systemPrompt = `You are an expert at filling in RFP (Request for Proposal) Excel templates with bid response content. You specialize in Swiss public procurement (Ausschreibungen).
+
+Given:
 1. The cell structure of an Excel workbook (sheet!cell: value)
 2. Drafted response sections for a bid
+3. Individual requirement texts from the database
 
-Your task is to map the drafted response content to the correct cells in the Excel template.
+Your task is to map bid responses to the correct cells in the Excel template.
 
-RULES:
-- Identify "answer cells" — these are typically empty cells, or cells with placeholder text like "Bitte ausfüllen", "[enter here]", "TODO", etc.
-- Answer cells are usually next to or below label/question cells
-- Match response content to the most relevant answer cell based on the label/question
-- Split long responses across multiple cells if the template expects row-by-row answers
-- Keep each cell value concise and appropriate for an Excel cell (max ~500 chars per cell)
-- Respect the original language of the template (German, English, French, Italian)
-- NEVER overwrite header cells, label cells, or question cells — only fill answer/input cells
-- If a response section doesn't match any cells, skip it
-- If unsure whether a cell should be filled, skip it (conservative approach)
+CRITICAL RULES — READ CAREFULLY:
+
+1. FINDING ANSWER CELLS:
+   - Look for empty cells, cells with "Bitte ausfuellen", "[enter here]", "TODO", placeholder text
+   - Look for existing answer/response columns: "Antwort", "Response", "Bemerkung", "Kommentar"
+
+2. IF NO ANSWER COLUMN EXISTS (very common in Swiss RFPs):
+   - Each sheet header shows the "answer column" letter (e.g., "answer column: G")
+   - Add a HEADER cell in the header row (usually row 2) of that column with value "Antwort des Anbieters"
+   - Then fill answer cells in that same column for EACH requirement/data row
+   - Skip section header rows (merged rows with category titles)
+   - Skip title rows (row 1) and header rows (row 2 — except for adding the column header)
+
+3. CONTENT MAPPING:
+   - Match each Excel row to the most relevant response section by category and content
+   - Write concise, specific answers (max 400 chars per cell) — not generic text
+   - If a response mentions specific technologies, certifications, or experience, include those details
+   - Use the same language as the template (German for German RFPs)
+   - For price sheets (Preisblatt): DO NOT fill price columns — only fill description/approach cells if any exist
+   - For eligibility criteria (Eignungskriterien): write how the bidder meets each criterion
+
+4. BE THOROUGH:
+   - Fill answers for EVERY requirement row that has a matching response
+   - Do not skip rows — the user expects comprehensive filling
+   - A partially filled Excel is better than an empty one
 
 Return a JSON object:
 {
   "mappings": [
-    {"sheet": "Sheet1", "cell": "B5", "value": "Your answer text here"},
-    {"sheet": "Sheet1", "cell": "C5", "value": "Another answer"}
+    {"sheet": "SheetName", "cell": "G2", "value": "Antwort des Anbieters"},
+    {"sheet": "SheetName", "cell": "G4", "value": "Answer for this requirement row"}
   ]
-}
-
-Only include cells that should be filled. Return an empty mappings array if nothing matches.`;
+}`;
 
   let userPrompt = `TENDER: "${tenderTitle}"\n\n`;
   userPrompt += `EXCEL CELL STRUCTURE:\n${cellContext}\n\n`;
@@ -315,6 +403,13 @@ Only include cells that should be filled. Return an empty mappings array if noth
   for (const section of responseSections) {
     if (section.draft_text) {
       userPrompt += `=== ${section.section_title} ===\n${section.draft_text}\n\n`;
+    }
+  }
+
+  if (requirements.length > 0) {
+    userPrompt += `\nINDIVIDUAL REQUIREMENTS FROM DATABASE (${requirements.length} total):\n`;
+    for (let i = 0; i < requirements.length; i++) {
+      userPrompt += `${i + 1}. [${requirements[i].category}] ${requirements[i].text}\n`;
     }
   }
 
@@ -330,8 +425,8 @@ Only include cells that should be filled. Return an empty mappings array if noth
       },
       body: JSON.stringify({
         model: OPENAI_MODEL,
-        temperature: 0.1,
-        max_tokens: 4096,
+        temperature: 0.15,
+        max_tokens: 12000,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
@@ -539,8 +634,9 @@ serve(async (req: Request) => {
       const sheetXml = new TextDecoder().decode(sheetFile);
       const sheetName = sheetNames[sheetIndex - 1] || `Sheet${sheetIndex}`;
       const cells = parseWorksheetStructure(sheetXml, sharedStrings);
+      const maxCol = cells.length > 0 ? findMaxColumn(cells) : "A";
 
-      sheets.push({ sheetName, sheetPath, cells });
+      sheets.push({ sheetName, sheetPath, cells, maxCol });
       sheetIndex++;
     }
 
@@ -557,6 +653,9 @@ serve(async (req: Request) => {
     console.log(
       `[export-filled-excel] Parsed ${sheets.length} sheets, ${sheets.reduce((s, sh) => s + sh.cells.length, 0)} total cells`,
     );
+    for (const sh of sheets) {
+      console.log(`  Sheet "${sh.sheetName}": ${sh.cells.length} cells, maxCol=${sh.maxCol}, answerCol=${indexToCol(colToIndex(sh.maxCol) + 1)}`);
+    }
 
     // ── Load response sections ───────────────────────────────────────
 
@@ -584,18 +683,37 @@ serve(async (req: Request) => {
       `[export-filled-excel] Loaded ${sections.length} response sections`,
     );
 
+    // ── Load individual requirements ─────────────────────────────────
+
+    const { data: requirements } = await adminClient
+      .from("requirements")
+      .select("id, text, category")
+      .eq("tender_id", tender_id);
+
+    console.log(
+      `[export-filled-excel] Loaded ${requirements?.length || 0} requirements`,
+    );
+
     // ── Call GPT-4o to map responses to cells ────────────────────────
 
     const cellContext = buildCellContext(sheets);
+    console.log(`[export-filled-excel] Cell context: ${cellContext.length} chars`);
+
     const mappingResult = await mapResponsesToCells(
       cellContext,
       sections,
+      (requirements || []).map(r => ({ text: r.text, category: r.category || "general" })),
       tender.title,
     );
 
     console.log(
       `[export-filled-excel] GPT-4o returned ${mappingResult.mappings.length} cell mappings`,
     );
+
+    // Log mapping details
+    for (const m of mappingResult.mappings.slice(0, 10)) {
+      console.log(`  ${m.sheet}!${m.cell}: ${m.value.substring(0, 80)}...`);
+    }
 
     if (mappingResult.mappings.length === 0) {
       return new Response(
