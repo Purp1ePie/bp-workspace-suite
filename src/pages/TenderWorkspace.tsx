@@ -13,7 +13,7 @@ import {
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
   Check, X as XIcon, Sparkles, FileSpreadsheet, Download, HelpCircle, Trash2,
-  UserCircle2, Filter, MessageSquare, Send, Play, Eye, ChevronDown, ChevronUp, ExternalLink,
+  UserCircle2, Filter, MessageSquare, Send, Play, ChevronDown, ChevronUp, ExternalLink,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -564,7 +564,6 @@ export default function TenderWorkspace() {
   const [matchSummaries, setMatchSummaries] = useState<Record<string, string>>({});
   const [loadingSummary, setLoadingSummary] = useState<string | null>(null);
   const [expandedTextMatchId, setExpandedTextMatchId] = useState<string | null>(null);
-  const [viewerAsset, setViewerAsset] = useState<KnowledgeAsset | null>(null);
 
   const handleDeleteDocument = async () => {
     if (!deleteDocTarget) return;
@@ -1851,14 +1850,20 @@ export default function TenderWorkspace() {
                                         </div>
                                       )}
 
-                                      {/* Document link */}
-                                      {asset && (
+                                      {/* Document link — opens original file */}
+                                      {asset?.storage_path && (
                                         <div className="flex items-center gap-3 pt-1 border-t border-border/20">
                                           <button
-                                            onClick={(e) => { e.stopPropagation(); setViewerAsset(asset); }}
+                                            onClick={async (e) => {
+                                              e.stopPropagation();
+                                              const { data } = await supabase.storage.from('knowledge-assets').createSignedUrl(asset.storage_path!, 600);
+                                              if (data?.signedUrl) {
+                                                window.open(data.signedUrl, '_blank');
+                                              }
+                                            }}
                                             className="text-xs text-primary hover:text-primary/80 flex items-center gap-1.5 transition-colors font-medium"
                                           >
-                                            <Eye className="h-3.5 w-3.5" />
+                                            <ExternalLink className="h-3.5 w-3.5" />
                                             {t('workspace.openDocument')}
                                           </button>
                                           {fileExt && (
@@ -2347,74 +2352,6 @@ export default function TenderWorkspace() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Document Viewer Modal */}
-      <AlertDialog open={!!viewerAsset} onOpenChange={(open) => { if (!open) setViewerAsset(null); }}>
-        <AlertDialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
-          <AlertDialogHeader className="shrink-0">
-            <AlertDialogTitle className="flex items-center gap-3">
-              <FileText className="h-5 w-5 text-primary shrink-0" />
-              <span className="truncate">{viewerAsset?.title || '—'}</span>
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="flex items-center gap-2 flex-wrap">
-                {viewerAsset?.asset_type && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium capitalize">
-                    {viewerAsset.asset_type.replace('_', ' ')}
-                  </span>
-                )}
-                {viewerAsset?.storage_path && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium uppercase">
-                    {viewerAsset.storage_path.split('.').pop()}
-                  </span>
-                )}
-                {viewerAsset?.tags && viewerAsset.tags.length > 0 && viewerAsset.tags.map((tag, i) => (
-                  <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-
-          <div className="flex-1 overflow-y-auto min-h-0 my-3">
-            {viewerAsset?.extracted_text ? (
-              <div className="bg-muted/30 rounded-lg p-4 border border-border/40">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                  {t('workspace.fullText')}
-                </p>
-                <div className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap font-mono text-[13px]">
-                  {viewerAsset.extracted_text}
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-12 text-sm text-muted-foreground">
-                {t('workspace.noPreview')}
-              </div>
-            )}
-          </div>
-
-          <AlertDialogFooter className="shrink-0 flex items-center gap-2">
-            {viewerAsset?.storage_path && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mr-auto"
-                onClick={async () => {
-                  if (!viewerAsset?.storage_path) return;
-                  const { data } = await supabase.storage.from('knowledge-assets').createSignedUrl(viewerAsset.storage_path, 300);
-                  if (data?.signedUrl) {
-                    window.open(data.signedUrl, '_blank');
-                  }
-                }}
-              >
-                <Download className="h-3.5 w-3.5 mr-1.5" />
-                {t('workspace.downloadFile')}
-              </Button>
-            )}
-            <AlertDialogCancel>{t('common.close')}</AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
