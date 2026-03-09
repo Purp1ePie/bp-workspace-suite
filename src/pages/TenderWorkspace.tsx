@@ -80,17 +80,24 @@ const severityConfig: Record<string, { color: string; dot: string }> = {
 function parseMatchReason(reason: string | null): { key: string; value: string }[] {
   if (!reason) return [];
   const items: { key: string; value: string }[] = [];
+  // New hybrid format: "ai_score=75%, semantic=60%, reason=Document covers SD-WAN deployment"
+  const reasonMatch = reason.match(/reason=(.+)$/);
+  if (reasonMatch) {
+    items.push({ key: 'matchAiReason', value: reasonMatch[1].trim() });
+  }
   const parts = reason.split(',').map(s => s.trim());
   for (const part of parts) {
-    const [k, v] = part.split('=');
+    const eqIdx = part.indexOf('=');
+    if (eqIdx < 0) continue;
+    const k = part.slice(0, eqIdx).trim();
+    const v = part.slice(eqIdx + 1).trim();
     if (!k || !v) continue;
-    // Semantic format: "semantic=75%, cat_bonus=10, has_text=true"
+    if (k === 'ai_score') items.push({ key: 'matchAiScore', value: v });
     if (k === 'semantic') items.push({ key: 'matchSemantic', value: v });
-    // Legacy keyword format: "title=2, text=5, type_bonus=15, cat_bonus=0"
+    // Legacy formats
     const num = parseInt(v, 10);
     if (k === 'title' && num > 0) items.push({ key: 'matchTitleTerms', value: String(num) + '×' });
     if (k === 'text' && num > 0) items.push({ key: 'matchTextTerms', value: String(num) + '×' });
-    if (k === 'type_bonus' && num > 0) items.push({ key: 'matchTypeBonus', value: '' });
     if (k === 'cat_bonus' && num > 0) items.push({ key: 'matchCatBonus', value: '' });
   }
   return items;

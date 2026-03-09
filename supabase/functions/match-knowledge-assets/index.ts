@@ -6,13 +6,20 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// ── Embedding helpers ──────────────────────────────────────────────
+// ── Config ─────────────────────────────────────────────────────────
 
 const EMBEDDING_MODEL = "text-embedding-3-large";
+const LLM_MODEL = "gpt-4o-mini";
 const MAX_ASSET_TEXT_FOR_EMBEDDING = 2000;
+const MAX_ASSET_TEXT_FOR_LLM = 800;
+const EMBEDDING_PRE_FILTER = 0.30; // loose pre-filter — let candidates through
+const MAX_CANDIDATES_PER_REQ = 5;  // top N from embeddings → LLM
+const LLM_MIN_SCORE = 50;          // LLM must score >= 50 to be a real match
+const MAX_MATCHES_PER_REQ = 3;     // final top N per requirement
+
+// ── Embedding helpers ──────────────────────────────────────────────
 
 async function getEmbeddings(texts: string[], apiKey: string): Promise<number[][]> {
-  // Batch up to 100 texts per API call (OpenAI limit is 2048)
   const allEmbeddings: number[][] = [];
   const batchSize = 100;
 
@@ -24,33 +31,26 @@ async function getEmbeddings(texts: string[], apiKey: string): Promise<number[][
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: EMBEDDING_MODEL,
-        input: batch,
-      }),
+      body: JSON.stringify({ model: EMBEDDING_MODEL, input: batch }),
       signal: AbortSignal.timeout(30000),
     });
 
     if (!resp.ok) {
       const errText = await resp.text();
-      throw new Error(`OpenAI Embeddings API error ${resp.status}: ${errText}`);
+      throw new Error(`Embeddings API error ${resp.status}: ${errText}`);
     }
 
     const data = await resp.json();
-    // Sort by index to preserve order
     const sorted = data.data.sort((a: any, b: any) => a.index - b.index);
     for (const item of sorted) {
       allEmbeddings.push(item.embedding);
     }
   }
-
   return allEmbeddings;
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0;
-  let magA = 0;
-  let magB = 0;
+  let dot = 0, magA = 0, magB = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     magA += a[i] * a[i];
@@ -60,17 +60,94 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
-// ── Bonus helpers (keep type/category alignment) ───────────────────
+// ── LLM verification ──────────────────────────────────────────────
 
-function categoryBonus(category: string | null, assetType: string): number {
-  if (!category) return 0;
-  if (category === "reference" && assetType === "reference") return 10;
-  if (category === "technical" && (assetType === "service_description" || assetType === "past_answer" || assetType === "past_tender")) return 8;
-  if (category === "commercial" && assetType === "template") return 8;
-  if (category === "administrative" && assetType === "certificate") return 8;
-  if (category === "legal" && assetType === "policy") return 8;
-  if (assetType === "past_tender") return 5;
-  return 0;
+interface LLMCandidate {
+  assetId: string;
+  assetTitle: string;
+  assetType: string;
+  textSnippet: string;
+  embeddingSimilarity: number;
+}
+
+interface LLMScore {
+  asset_id: string;
+  score: number;
+  reason: string;
+}
+
+async function verifyMatchesWithLLM(
+  requirementText: string,
+  requirementCategory: string | null,
+  candidates: LLMCandidate[],
+  apiKey: string,
+): Promise<LLMScore[]> {
+  if (candidates.length === 0) return [];
+
+  const docsBlock = candidates.map((c, i) =>
+    `${i + 1}. [ID: ${c.assetId}] "${c.assetTitle}" (${c.assetType.replace(/_/g, " ")})\n   Content: ${c.textSnippet}`
+  ).join("\n\n");
+
+  const systemPrompt = `You are a bid analyst evaluating whether company knowledge documents are relevant to a specific tender requirement.
+
+CRITICAL: Only score a document as relevant (50+) if the document's DOMAIN, SUBJECT MATTER, and CONTENT directly apply to the tender requirement.
+
+Superficial similarities do NOT count:
+- Both being "proposals" or "offers" is NOT enough
+- Both mentioning "project management" is NOT enough
+- The document must contain information that could actually help answer or fulfill the requirement
+
+Scoring:
+- 0-20: Completely irrelevant (different domain/industry)
+- 21-49: Superficially similar but not applicable
+- 50-69: Partially relevant (same domain, some applicable content)
+- 70-85: Highly relevant (directly applicable knowledge)
+- 86-100: Perfect match (directly addresses the requirement)
+
+Return ONLY a valid JSON object: {"scores": [{"asset_id": "...", "score": N, "reason": "one sentence explanation"}]}`;
+
+  const userPrompt = `TENDER REQUIREMENT (${requirementCategory || "general"}):\n"${requirementText}"\n\nCANDIDATE DOCUMENTS:\n${docsBlock}\n\nRate each document's relevance to this specific requirement.`;
+
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: LLM_MODEL,
+      temperature: 0.1,
+      max_tokens: 500,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  if (!resp.ok) {
+    console.error("LLM verification failed:", resp.status);
+    // Fallback: return embedding scores as-is
+    return candidates.map(c => ({
+      asset_id: c.assetId,
+      score: Math.round(c.embeddingSimilarity * 80),
+      reason: "LLM verification failed, using embedding score",
+    }));
+  }
+
+  const data = await resp.json();
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) return [];
+
+  try {
+    const parsed = JSON.parse(content);
+    return parsed.scores || [];
+  } catch {
+    console.error("Failed to parse LLM response:", content);
+    return [];
+  }
 }
 
 // ── Main handler ───────────────────────────────────────────────────
@@ -81,7 +158,7 @@ serve(async (req) => {
   }
 
   try {
-    console.log("match-knowledge-assets invoked (semantic v2)");
+    console.log("match-knowledge-assets invoked (hybrid v3: embeddings + LLM)");
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -179,12 +256,11 @@ serve(async (req) => {
       );
     }
 
-    // ── Build text representations for embedding ──────────────────
+    // ── Phase 1: Embeddings — fast pre-filter ─────────────────────
 
-    // Requirements: use the requirement text directly
+    console.log("Phase 1: Generating embeddings...");
+
     const reqTexts = requirements.map((r) => r.text);
-
-    // Assets: combine title + tags + first N chars of extracted_text for richer context
     const assetTexts = assets.map((a) => {
       const parts: string[] = [];
       if (a.title) parts.push(a.title);
@@ -198,18 +274,12 @@ serve(async (req) => {
       return parts.join("\n");
     });
 
-    // ── Generate embeddings ───────────────────────────────────────
-
-    console.log("Generating embeddings for", reqTexts.length, "requirements and", assetTexts.length, "assets");
-
-    // Combine all texts into one batch for efficiency
     const allTexts = [...reqTexts, ...assetTexts];
     const allEmbeddings = await getEmbeddings(allTexts, openaiKey);
-
     const reqEmbeddings = allEmbeddings.slice(0, reqTexts.length);
     const assetEmbeddings = allEmbeddings.slice(reqTexts.length);
 
-    console.log("Embeddings generated:", reqEmbeddings.length, "+", assetEmbeddings.length);
+    console.log("Embeddings done. Phase 2: LLM verification...");
 
     // ── Delete old matches ────────────────────────────────────────
 
@@ -226,7 +296,7 @@ serve(async (req) => {
       );
     }
 
-    // ── Score each requirement × asset pair ───────────────────────
+    // ── Phase 2: LLM verification — accurate scoring ─────────────
 
     const rowsToInsert: Array<{
       organization_id: string;
@@ -238,57 +308,79 @@ serve(async (req) => {
       status: "suggested";
     }> = [];
 
-    for (let ri = 0; ri < requirements.length; ri++) {
-      const req = requirements[ri];
-      const reqEmb = reqEmbeddings[ri];
+    // Process requirements in parallel batches of 5 for speed
+    const batchSize = 5;
+    for (let batchStart = 0; batchStart < requirements.length; batchStart += batchSize) {
+      const batch = requirements.slice(batchStart, batchStart + batchSize);
 
-      const scored = assets.map((asset, ai) => {
-        const similarity = cosineSimilarity(reqEmb, assetEmbeddings[ai]);
-        const catBonus = categoryBonus(req.category, asset.asset_type);
-        const hasText = asset.extracted_text && asset.extracted_text.length > 0;
+      const batchPromises = batch.map(async (req, batchIdx) => {
+        const ri = batchStart + batchIdx;
+        const reqEmb = reqEmbeddings[ri];
 
-        // Semantic similarity is primary (0-1 range → 0-85 score)
-        // Category bonus adds up to 10
-        // Having extracted text adds 3 (richer context = more trustworthy)
-        const semanticScore = Math.round(similarity * 85);
-        const score = Math.min(100, semanticScore + catBonus + (hasText ? 3 : 0));
-
-        return {
+        // Score all assets with embeddings
+        const embeddingScores = assets.map((asset, ai) => ({
           asset,
-          score,
-          similarity: Math.round(similarity * 100) / 100,
-          reason: `semantic=${Math.round(similarity * 100)}%, cat_bonus=${catBonus}, has_text=${!!hasText}`,
-        };
+          similarity: cosineSimilarity(reqEmb, assetEmbeddings[ai]),
+        }));
+
+        // Pre-filter: top N candidates above threshold
+        const candidates = embeddingScores
+          .filter((m) => m.similarity >= EMBEDDING_PRE_FILTER)
+          .sort((a, b) => b.similarity - a.similarity)
+          .slice(0, MAX_CANDIDATES_PER_REQ);
+
+        if (candidates.length === 0) return;
+
+        // Build LLM candidates
+        const llmCandidates: LLMCandidate[] = candidates.map((c) => ({
+          assetId: c.asset.id,
+          assetTitle: c.asset.title || "Untitled",
+          assetType: c.asset.asset_type || "unknown",
+          textSnippet: (c.asset.extracted_text || "").slice(0, MAX_ASSET_TEXT_FOR_LLM).trim() || "(no text)",
+          embeddingSimilarity: c.similarity,
+        }));
+
+        // LLM verification
+        const llmScores = await verifyMatchesWithLLM(
+          req.text,
+          req.category,
+          llmCandidates,
+          openaiKey,
+        );
+
+        // Merge: use LLM score as confidence, filter by LLM_MIN_SCORE
+        const verified = llmScores
+          .filter((s) => s.score >= LLM_MIN_SCORE)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, MAX_MATCHES_PER_REQ);
+
+        if (verified.length > 0) {
+          console.log(
+            "Req:", req.text.slice(0, 50), "→",
+            verified.map((v) => `${v.asset_id.slice(0, 8)}(${v.score}%)`).join(", ")
+          );
+        }
+
+        for (const v of verified) {
+          const embCandidate = candidates.find(c => c.asset.id === v.asset_id);
+          const embSim = embCandidate ? Math.round(embCandidate.similarity * 100) : 0;
+
+          rowsToInsert.push({
+            organization_id: profile.organization_id,
+            tender_id,
+            requirement_id: req.id,
+            knowledge_asset_id: v.asset_id,
+            confidence_score: v.score,
+            match_reason: `ai_score=${v.score}%, semantic=${embSim}%, reason=${v.reason}`,
+            status: "suggested",
+          });
+        }
       });
 
-      // Filter: require at least 50% semantic similarity — strict threshold
-      // to only show genuinely relevant matches, not superficial overlap
-      const topMatches = scored
-        .filter((m) => m.similarity >= 0.50 && m.score >= 45)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3);
-
-      if (topMatches.length > 0) {
-        console.log(
-          "Req:", req.text.slice(0, 50), "→",
-          topMatches.map((m) => `${m.asset.title}(${m.score}%)`).join(", ")
-        );
-      }
-
-      for (const match of topMatches) {
-        rowsToInsert.push({
-          organization_id: profile.organization_id,
-          tender_id,
-          requirement_id: req.id,
-          knowledge_asset_id: match.asset.id,
-          confidence_score: match.score,
-          match_reason: match.reason,
-          status: "suggested",
-        });
-      }
+      await Promise.all(batchPromises);
     }
 
-    console.log("Total matches to insert:", rowsToInsert.length);
+    console.log("Total verified matches:", rowsToInsert.length);
 
     if (rowsToInsert.length > 0) {
       const { error: insertError } = await adminClient
