@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
+import { useAuth } from '@/hooks/useAuth';
 import { StatusBadge } from '@/components/StatusBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,7 @@ import {
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
   Check, X as XIcon, Sparkles, FileSpreadsheet, Download, HelpCircle, Trash2,
+  UserCircle2, Filter, MessageSquare, Send,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -37,6 +39,9 @@ type ChecklistItem = Tables<'checklist_items'>;
 type RequirementMatch = Tables<'requirement_matches'>;
 type KnowledgeAsset = Tables<'knowledge_assets'>;
 type ClarificationQuestion = Tables<'clarification_questions'>;
+type Profile = Tables<'profiles'>;
+
+type ChecklistFilter = 'all' | 'mine' | 'unassigned';
 
 const TABS = ['overview', 'documents', 'requirements', 'risks', 'knowledge', 'draft', 'clarifications', 'checklist'] as const;
 type Tab = typeof TABS[number];
@@ -75,6 +80,7 @@ export default function TenderWorkspace() {
   const { id } = useParams<{ id: string }>();
   const { t, language } = useI18n();
   const { toast } = useToast();
+  const { user } = useAuth();
   const dateFnsLocale = language === 'de' ? de : enUS;
   const [tender, setTender] = useState<Tender | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -91,6 +97,14 @@ export default function TenderWorkspace() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [savingSection, setSavingSection] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
+  const [orgMembers, setOrgMembers] = useState<Profile[]>([]);
+  const [checklistFilter, setChecklistFilter] = useState<ChecklistFilter>('all');
+  const [assignDropdownId, setAssignDropdownId] = useState<string | null>(null);
+  const [expandedChecklistId, setExpandedChecklistId] = useState<string | null>(null);
+  const [comments, setComments] = useState<Record<string, any[]>>({});
+  const [commentText, setCommentText] = useState('');
+  const [loadingComments, setLoadingComments] = useState<string | null>(null);
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -124,11 +138,42 @@ export default function TenderWorkspace() {
     } else {
       setKnowledgeAssets([]);
     }
+
+    // Load org members for assignments
+    const tenderData = tRes.data;
+    if (tenderData?.organization_id) {
+      const { data: members } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('organization_id', tenderData.organization_id)
+        .order('full_name');
+      setOrgMembers(members || []);
+    }
+
+    // Load activity logs
+    const { data: logs } = await supabase
+      .from('activity_logs')
+      .select('*, profiles(full_name)')
+      .eq('tender_id', id)
+      .order('created_at', { ascending: false })
+      .limit(15);
+    setActivityLogs(logs || []);
   }, [id]);
 
   useEffect(() => {
     loadData().then(() => setLoading(false));
   }, [loadData]);
+
+  const logActivity = async (actionType: string, payload: Record<string, unknown> = {}) => {
+    if (!user || !tender?.organization_id || !id) return;
+    await supabase.from('activity_logs').insert({
+      action_type: actionType,
+      action_payload: payload,
+      profile_id: user.id,
+      tender_id: id,
+      organization_id: tender.organization_id,
+    });
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -153,6 +198,113 @@ export default function TenderWorkspace() {
     const { error } = await supabase.from('checklist_items').update({ status: newStatus }).eq('id', item.id);
     if (!error) {
       setChecklist(prev => prev.map(c => c.id === item.id ? { ...c, status: newStatus } : c));
+      logActivity(newStatus === 'done' ? 'checklist_completed' : 'checklist_reopened', { title: item.title });
+    }
+  };
+
+  const handleAssignChecklist = async (itemId: string, profileId: string | null) => {
+    const { error } = await supabase
+      .from('checklist_items')
+      .update({ owner_profile_id: profileId })
+      .eq('id', itemId);
+    if (!error) {
+      setChecklist(prev => prev.map(c => c.id === itemId ? { ...c, owner_profile_id: profileId } : c));
+      const item = checklist.find(c => c.id === itemId);
+      logActivity('checklist_assigned', { title: item?.title, assignee: getMemberName(profileId) });
+
+      // Create notification for the assignee (if not self-assigning)
+      if (profileId && profileId !== user?.id && tender?.organization_id) {
+        await supabase.from('notifications').insert({
+          profile_id: profileId,
+          organization_id: tender.organization_id,
+          type: 'assignment',
+          title: language === 'de' ? 'Neue Aufgabe zugewiesen' : 'New task assigned',
+          body: item?.title || '',
+          link: `/tenders/${id}?tab=checklist`,
+        });
+      }
+    }
+    setAssignDropdownId(null);
+  };
+
+  const getMemberName = (profileId: string | null) => {
+    if (!profileId) return null;
+    const member = orgMembers.find(m => m.id === profileId);
+    return member?.full_name || null;
+  };
+
+  const getMemberInitial = (profileId: string | null) => {
+    const name = getMemberName(profileId);
+    return name ? name.charAt(0).toUpperCase() : '?';
+  };
+
+  const filteredChecklist = checklist.filter(c => {
+    if (checklistFilter === 'mine') return c.owner_profile_id === user?.id;
+    if (checklistFilter === 'unassigned') return !c.owner_profile_id;
+    return true;
+  });
+
+  const handleExpandChecklist = async (itemId: string) => {
+    if (expandedChecklistId === itemId) {
+      setExpandedChecklistId(null);
+      return;
+    }
+    setExpandedChecklistId(itemId);
+    setCommentText('');
+    if (!comments[itemId]) {
+      setLoadingComments(itemId);
+      const { data } = await supabase
+        .from('comments')
+        .select('*, profiles(full_name)')
+        .eq('entity_type', 'checklist_item')
+        .eq('entity_id', itemId)
+        .order('created_at', { ascending: true });
+      setComments(prev => ({ ...prev, [itemId]: data || [] }));
+      setLoadingComments(null);
+    }
+  };
+
+  const handleAddComment = async (itemId: string) => {
+    const body = commentText.trim();
+    if (!body || !user || !tender?.organization_id) return;
+    const { data, error } = await supabase
+      .from('comments')
+      .insert({
+        entity_type: 'checklist_item',
+        entity_id: itemId,
+        author_profile_id: user.id,
+        organization_id: tender.organization_id,
+        body,
+      })
+      .select('*, profiles(full_name)')
+      .single();
+    if (!error && data) {
+      setComments(prev => ({ ...prev, [itemId]: [...(prev[itemId] || []), data] }));
+      setCommentText('');
+      logActivity('comment_added', { entity_type: 'checklist_item' });
+
+      // Notify the checklist item owner (if not self)
+      const item = checklist.find(c => c.id === itemId);
+      if (item?.owner_profile_id && item.owner_profile_id !== user?.id && tender?.organization_id) {
+        await supabase.from('notifications').insert({
+          profile_id: item.owner_profile_id,
+          organization_id: tender.organization_id,
+          type: 'comment',
+          title: language === 'de' ? 'Neuer Kommentar' : 'New comment',
+          body: `${getMemberName(user?.id ?? null) || '—'}: ${body.slice(0, 100)}`,
+          link: `/tenders/${id}?tab=checklist`,
+        });
+      }
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string, itemId: string) => {
+    const { error } = await supabase.from('comments').delete().eq('id', commentId);
+    if (!error) {
+      setComments(prev => ({
+        ...prev,
+        [itemId]: (prev[itemId] || []).filter((c: any) => c.id !== commentId),
+      }));
     }
   };
 
@@ -772,6 +924,49 @@ export default function TenderWorkspace() {
                 </div>
               </div>
             )}
+
+            {/* Activity Feed */}
+            {activityLogs.length > 0 && (
+              <div className="glass-card p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="font-heading font-semibold text-sm">{t('workspace.recentActivity')}</h3>
+                </div>
+                <div className="space-y-3">
+                  {activityLogs.map((log: any) => {
+                    const actionIcons: Record<string, any> = {
+                      tender_created: Target,
+                      document_uploaded: FileText,
+                      processing_complete: CheckCircle2,
+                      response_generated: Edit,
+                      checklist_assigned: UserCircle2,
+                      checklist_completed: CheckSquare,
+                      checklist_reopened: Circle,
+                      comment_added: MessageSquare,
+                      document_deleted: Trash2,
+                    };
+                    const Icon = actionIcons[log.action_type] || Info;
+                    return (
+                      <div key={log.id} className="flex items-start gap-3">
+                        <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                          <Icon className="h-3 w-3 text-muted-foreground" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs">
+                            <span className="font-medium">{log.profiles?.full_name || '—'}</span>
+                            {' '}
+                            <span className="text-muted-foreground">{t(`activity.${log.action_type}` as any) || log.action_type}</span>
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {formatDistanceToNow(new Date(log.created_at), { addSuffix: true, locale: dateFnsLocale })}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1303,39 +1498,190 @@ export default function TenderWorkspace() {
                 <Progress value={checklistProgress} className="h-2" />
               </div>
 
+              {/* Filter bar */}
+              {orgMembers.length > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                  {(['all', 'mine', 'unassigned'] as ChecklistFilter[]).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setChecklistFilter(f)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                        checklistFilter === f
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      {t(`workspace.filter.${f}` as any)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Open items first, then done */}
               <div className="space-y-2">
-                {[...checklist].sort((a, b) => {
+                {[...filteredChecklist].sort((a, b) => {
                   if (a.status === 'done' && b.status !== 'done') return 1;
                   if (a.status !== 'done' && b.status === 'done') return -1;
                   return 0;
                 }).map(c => (
                   <div
                     key={c.id}
-                    className={`glass-card px-5 py-3.5 flex items-center gap-4 transition-colors hover:border-primary/20 ${
+                    className={`glass-card transition-colors hover:border-primary/20 ${
                       c.status === 'done' ? 'opacity-60' : ''
                     }`}
                   >
-                    <button
-                      onClick={() => handleToggleChecklist(c)}
-                      className="shrink-0 transition-colors"
-                    >
-                      {c.status === 'done' ? (
-                        <CheckCircle2 className="h-5 w-5 text-success" />
-                      ) : (
-                        <Circle className="h-5 w-5 text-muted-foreground hover:text-primary" />
+                    <div className="px-5 py-3.5 flex items-center gap-4">
+                      <button
+                        onClick={() => handleToggleChecklist(c)}
+                        className="shrink-0 transition-colors"
+                      >
+                        {c.status === 'done' ? (
+                          <CheckCircle2 className="h-5 w-5 text-success" />
+                        ) : (
+                          <Circle className="h-5 w-5 text-muted-foreground hover:text-primary" />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => handleExpandChecklist(c.id)}
+                        className={`text-sm flex-1 text-left ${c.status === 'done' ? 'line-through text-muted-foreground' : ''}`}
+                      >
+                        {c.title}
+                      </button>
+
+                      {/* Comment count */}
+                      <button
+                        onClick={() => handleExpandChecklist(c.id)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors shrink-0"
+                      >
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        {comments[c.id]?.length || 0}
+                      </button>
+
+                      {/* Assignee */}
+                      <div className="relative shrink-0">
+                        <button
+                          onClick={() => setAssignDropdownId(assignDropdownId === c.id ? null : c.id)}
+                          className="flex items-center gap-1.5 text-xs transition-colors hover:text-primary"
+                          title={getMemberName(c.owner_profile_id) || t('workspace.unassigned')}
+                        >
+                          {c.owner_profile_id ? (
+                            <div className="h-6 w-6 rounded-full bg-primary/15 flex items-center justify-center">
+                              <span className="text-[10px] font-medium text-primary">{getMemberInitial(c.owner_profile_id)}</span>
+                            </div>
+                          ) : (
+                            <UserCircle2 className="h-5 w-5 text-muted-foreground/50" />
+                          )}
+                        </button>
+
+                        {/* Assignment dropdown */}
+                        {assignDropdownId === c.id && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setAssignDropdownId(null)} />
+                            <div className="absolute right-0 top-full mt-1 w-48 bg-popover border border-border rounded-lg shadow-lg z-50 py-1">
+                              <button
+                                onClick={() => handleAssignChecklist(c.id, null)}
+                                className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-accent transition-colors ${!c.owner_profile_id ? 'text-primary font-medium' : 'text-muted-foreground'}`}
+                              >
+                                <UserCircle2 className="h-4 w-4" />
+                                {t('workspace.unassigned')}
+                              </button>
+                              {orgMembers.map(m => (
+                                <button
+                                  key={m.id}
+                                  onClick={() => handleAssignChecklist(c.id, m.id)}
+                                  className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-accent transition-colors ${c.owner_profile_id === m.id ? 'text-primary font-medium' : ''}`}
+                                >
+                                  <div className="h-4 w-4 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                                    <span className="text-[8px] font-medium text-primary">{(m.full_name || '?').charAt(0).toUpperCase()}</span>
+                                  </div>
+                                  <span className="truncate">{m.full_name || m.id.slice(0, 8)}</span>
+                                  {m.id === user?.id && <span className="text-muted-foreground ml-auto">({t('settings.you')})</span>}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      {c.due_at && (
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {format(new Date(c.due_at), 'dd MMM', { locale: dateFnsLocale })}
+                        </span>
                       )}
-                    </button>
-                    <span className={`text-sm flex-1 ${c.status === 'done' ? 'line-through text-muted-foreground' : ''}`}>
-                      {c.title}
-                    </span>
-                    {c.due_at && (
-                      <span className="text-xs text-muted-foreground shrink-0">
-                        {format(new Date(c.due_at), 'dd MMM', { locale: dateFnsLocale })}
-                      </span>
+                    </div>
+
+                    {/* Expanded comments section */}
+                    {expandedChecklistId === c.id && (
+                      <div className="px-5 pb-4 pt-0 border-t border-border/50">
+                        <div className="mt-3 space-y-3">
+                          {loadingComments === c.id ? (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                              <Loader2 className="h-3 w-3 animate-spin" /> {t('common.loading')}
+                            </div>
+                          ) : (
+                            <>
+                              {(comments[c.id] || []).length === 0 && (
+                                <p className="text-xs text-muted-foreground py-1">{t('workspace.noComments')}</p>
+                              )}
+                              {(comments[c.id] || []).map((comment: any) => (
+                                <div key={comment.id} className="flex gap-2.5 group">
+                                  <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                                    <span className="text-[10px] font-medium">
+                                      {(comment.profiles?.full_name || '?').charAt(0).toUpperCase()}
+                                    </span>
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-medium">{comment.profiles?.full_name || '—'}</span>
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {formatDistanceToNow(new Date(comment.created_at), { addSuffix: true, locale: dateFnsLocale })}
+                                      </span>
+                                      {comment.author_profile_id === user?.id && (
+                                        <button
+                                          onClick={() => handleDeleteComment(comment.id, c.id)}
+                                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all ml-auto"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-foreground mt-0.5">{comment.body}</p>
+                                  </div>
+                                </div>
+                              ))}
+
+                              {/* Add comment */}
+                              <div className="flex gap-2 pt-1">
+                                <input
+                                  type="text"
+                                  value={commentText}
+                                  onChange={e => setCommentText(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter' && commentText.trim()) handleAddComment(c.id); }}
+                                  placeholder={t('workspace.addComment')}
+                                  className="flex-1 text-xs bg-muted/50 border border-border rounded-md px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
+                                />
+                                <button
+                                  onClick={() => handleAddComment(c.id)}
+                                  disabled={!commentText.trim()}
+                                  className="text-primary hover:text-primary/80 disabled:text-muted-foreground transition-colors"
+                                >
+                                  <Send className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     )}
                   </div>
                 ))}
+
+                {filteredChecklist.length === 0 && checklist.length > 0 && (
+                  <div className="text-center py-8 text-sm text-muted-foreground">
+                    {t('workspace.noFilterResults')}
+                  </div>
+                )}
               </div>
             </div>
           )

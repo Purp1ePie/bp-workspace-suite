@@ -17,9 +17,13 @@ import {
   Building2,
   User,
   Compass,
+  Bell,
+  CheckCheck,
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { formatDistanceToNow } from 'date-fns';
+import { de, enUS } from 'date-fns/locale';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' as const },
@@ -31,14 +35,30 @@ const navItems = [
   { to: '/settings', icon: Settings, labelKey: 'nav.settings' as const },
 ];
 
+interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  read: boolean;
+  created_at: string;
+}
+
 export default function AppLayout() {
   const { signOut, user } = useAuth();
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const navigate = useNavigate();
+  const dateFnsLocale = language === 'de' ? de : enUS;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [profile, setProfile] = useState<{ full_name: string | null; role_name: string | null } | null>(null);
   const [orgName, setOrgName] = useState<string | null>(null);
+
+  // Notifications
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifOpen, setNotifOpen] = useState(false);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -53,6 +73,47 @@ export default function AppLayout() {
     };
     if (user) loadProfile();
   }, [user]);
+
+  const loadNotifications = useCallback(async () => {
+    if (!user) return;
+    const { data, count } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact' })
+      .eq('profile_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    setNotifications(data || []);
+    const unread = (data || []).filter(n => !n.read).length;
+    setUnreadCount(unread);
+  }, [user]);
+
+  useEffect(() => {
+    loadNotifications();
+    // Poll every 30s
+    const interval = setInterval(loadNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [loadNotifications]);
+
+  const handleMarkAllRead = async () => {
+    if (!user) return;
+    await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('profile_id', user.id)
+      .eq('read', false);
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    setUnreadCount(0);
+  };
+
+  const handleClickNotification = async (notif: Notification) => {
+    if (!notif.read) {
+      await supabase.from('notifications').update({ read: true }).eq('id', notif.id);
+      setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    }
+    setNotifOpen(false);
+    if (notif.link) navigate(notif.link);
+  };
 
   const handleSignOut = async () => {
     await signOut();
@@ -144,11 +205,77 @@ export default function AppLayout() {
 
           <div className="flex items-center gap-2">
             <LanguageSwitcher />
-            
+
+            {/* Notification bell */}
+            <div className="relative">
+              <button
+                onClick={() => { setNotifOpen(!notifOpen); setUserMenuOpen(false); }}
+                className="relative p-2 rounded-lg hover:bg-accent transition-colors"
+              >
+                <Bell className="h-4 w-4 text-muted-foreground" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-1 right-1 h-4 min-w-[16px] rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center px-1">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {notifOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 w-80 bg-popover border border-border rounded-lg shadow-lg z-50">
+                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
+                      <span className="text-sm font-semibold">{t('notifications.title')}</span>
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={handleMarkAllRead}
+                          className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
+                        >
+                          <CheckCheck className="h-3 w-3" />
+                          {t('notifications.markAllRead')}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="max-h-80 overflow-y-auto">
+                      {notifications.length === 0 ? (
+                        <div className="py-8 text-center text-sm text-muted-foreground">
+                          {t('notifications.empty')}
+                        </div>
+                      ) : (
+                        notifications.map(n => (
+                          <button
+                            key={n.id}
+                            onClick={() => handleClickNotification(n)}
+                            className={`w-full text-left px-4 py-3 hover:bg-accent transition-colors border-b border-border/50 last:border-0 ${
+                              !n.read ? 'bg-primary/5' : ''
+                            }`}
+                          >
+                            <div className="flex items-start gap-2.5">
+                              {!n.read && (
+                                <span className="h-2 w-2 rounded-full bg-primary shrink-0 mt-1.5" />
+                              )}
+                              <div className={`flex-1 min-w-0 ${n.read ? 'ml-4' : ''}`}>
+                                <p className="text-xs font-medium truncate">{n.title}</p>
+                                {n.body && <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>}
+                                <p className="text-[10px] text-muted-foreground mt-1">
+                                  {formatDistanceToNow(new Date(n.created_at), { addSuffix: true, locale: dateFnsLocale })}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
             {/* User menu */}
             <div className="relative">
               <button
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                onClick={() => { setUserMenuOpen(!userMenuOpen); setNotifOpen(false); }}
                 className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm hover:bg-accent transition-colors"
               >
                 <div className="h-6 w-6 rounded-full bg-primary/20 flex items-center justify-center">
