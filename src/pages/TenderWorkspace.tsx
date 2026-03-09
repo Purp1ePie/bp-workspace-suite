@@ -77,15 +77,15 @@ const severityConfig: Record<string, { color: string; dot: string }> = {
   low: { color: 'text-info bg-info/15', dot: 'bg-info' },
 };
 
-function parseMatchReason(reason: string | null): { key: string; value: string }[] {
-  if (!reason) return [];
+function parseMatchReason(reason: string | null): { items: { key: string; value: string }[]; aiReason: string | null } {
+  if (!reason) return { items: [], aiReason: null };
   const items: { key: string; value: string }[] = [];
-  // New hybrid format: "ai_score=75%, semantic=60%, reason=Document covers SD-WAN deployment"
+  // Extract AI reason text (comes after "reason=")
   const reasonMatch = reason.match(/reason=(.+)$/);
-  if (reasonMatch) {
-    items.push({ key: 'matchAiReason', value: reasonMatch[1].trim() });
-  }
-  const parts = reason.split(',').map(s => s.trim());
+  const aiReason = reasonMatch ? reasonMatch[1].trim() : null;
+  // Parse key=value pairs (stop before "reason=" to avoid pollution)
+  const cleanedReason = reason.replace(/,?\s*reason=.+$/, '');
+  const parts = cleanedReason.split(',').map(s => s.trim());
   for (const part of parts) {
     const eqIdx = part.indexOf('=');
     if (eqIdx < 0) continue;
@@ -100,7 +100,7 @@ function parseMatchReason(reason: string | null): { key: string; value: string }
     if (k === 'text' && num > 0) items.push({ key: 'matchTextTerms', value: String(num) + '×' });
     if (k === 'cat_bonus' && num > 0) items.push({ key: 'matchCatBonus', value: '' });
   }
-  return items;
+  return { items, aiReason };
 }
 
 export default function TenderWorkspace() {
@@ -1715,7 +1715,7 @@ export default function TenderWorkspace() {
                               rejected: 'bg-destructive/15 text-destructive',
                             };
                             const isExpanded = expandedMatchId === match.id;
-                            const reasons = parseMatchReason(match.match_reason);
+                            const { items: reasons, aiReason } = parseMatchReason(match.match_reason);
                             const fileExt = asset?.storage_path ? asset.storage_path.split('.').pop()?.toUpperCase() : null;
                             const textPreview = asset?.extracted_text ? asset.extracted_text.slice(0, 200).trim() + (asset.extracted_text.length > 200 ? '...' : '') : null;
 
@@ -1750,11 +1750,11 @@ export default function TenderWorkspace() {
                                         {t('workspace.confidence')}: <span className="font-semibold text-foreground">{match.confidence_score}%</span>
                                       </span>
                                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${matchStatusColors[match.status] || 'bg-muted text-muted-foreground'}`}>
-                                        {match.status === 'suggested' ? t('workspace.confidence') : match.status === 'accepted' ? t('workspace.acceptMatch') : t('workspace.rejectMatch')}
+                                        {match.status === 'suggested' ? t('workspace.matchSuggested') : match.status === 'accepted' ? t('workspace.matchAccepted') : t('workspace.matchRejected')}
                                       </span>
-                                      {reasons.length > 0 && !isExpanded && (
-                                        <span className="text-[10px] text-muted-foreground/60">
-                                          {reasons.map(r => r.value ? `${t(`workspace.${r.key}` as any)} ${r.value}` : t(`workspace.${r.key}` as any)).join(' · ')}
+                                      {aiReason && !isExpanded && (
+                                        <span className="text-[10px] text-muted-foreground/60 truncate max-w-[300px]" title={aiReason}>
+                                          {aiReason}
                                         </span>
                                       )}
                                     </div>
@@ -1810,17 +1810,24 @@ export default function TenderWorkspace() {
                                       </div>
 
                                       {/* Match reasons */}
-                                      {reasons.length > 0 && (
+                                      {(reasons.length > 0 || aiReason) && (
                                         <div>
                                           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t('workspace.whyMatch')}</p>
-                                          <div className="space-y-1">
-                                            {reasons.map((r, i) => (
-                                              <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                <CheckCircle2 className="h-3 w-3 text-primary shrink-0" />
-                                                <span>{t(`workspace.${r.key}` as any)}{r.value ? ` ${r.value}` : ''}</span>
-                                              </div>
-                                            ))}
-                                          </div>
+                                          {aiReason && (
+                                            <p className="text-xs text-foreground/80 leading-relaxed mb-2 italic">
+                                              {aiReason}
+                                            </p>
+                                          )}
+                                          {reasons.length > 0 && (
+                                            <div className="space-y-1">
+                                              {reasons.map((r, i) => (
+                                                <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                  <CheckCircle2 className="h-3 w-3 text-primary shrink-0" />
+                                                  <span>{t(`workspace.${r.key}` as any)}{r.value ? ` ${r.value}` : ''}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
                                         </div>
                                       )}
 

@@ -81,6 +81,7 @@ async function verifyMatchesWithLLM(
   requirementCategory: string | null,
   candidates: LLMCandidate[],
   apiKey: string,
+  outputLanguage: string,
 ): Promise<LLMScore[]> {
   if (candidates.length === 0) return [];
 
@@ -104,7 +105,9 @@ Scoring:
 - 70-85: Highly relevant (directly applicable knowledge)
 - 86-100: Perfect match (directly addresses the requirement)
 
-Return ONLY a valid JSON object: {"scores": [{"asset_id": "...", "score": N, "reason": "one sentence explanation"}]}`;
+IMPORTANT: Write the "reason" field in ${outputLanguage}. Keep it to one clear sentence.
+
+Return ONLY a valid JSON object: {"scores": [{"asset_id": "...", "score": N, "reason": "one sentence explanation in ${outputLanguage}"}]}`;
 
   const userPrompt = `TENDER REQUIREMENT (${requirementCategory || "general"}):\n"${requirementText}"\n\nCANDIDATE DOCUMENTS:\n${docsBlock}\n\nRate each document's relevance to this specific requirement.`;
 
@@ -213,7 +216,7 @@ serve(async (req) => {
 
     const { data: tender } = await adminClient
       .from("tenders")
-      .select("id, organization_id")
+      .select("id, organization_id, language")
       .eq("id", tender_id)
       .single();
 
@@ -230,6 +233,10 @@ serve(async (req) => {
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+
+    // Determine output language for LLM reasons
+    const langMap: Record<string, string> = { de: "German", en: "English", fr: "French", it: "Italian" };
+    const outputLanguage = langMap[tender.language || "de"] || "German";
 
     // Load data
     const { data: requirements } = await adminClient
@@ -346,6 +353,7 @@ serve(async (req) => {
           req.category,
           llmCandidates,
           openaiKey,
+          outputLanguage,
         );
 
         // Merge: use LLM score as confidence, filter by LLM_MIN_SCORE
