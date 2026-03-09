@@ -28,7 +28,7 @@ import type { Tables } from '@/integrations/supabase/types';
 
 type KnowledgeAsset = Tables<'knowledge_assets'>;
 
-const ASSET_TYPES = ['reference', 'certificate', 'cv', 'policy', 'service_description', 'template', 'past_answer'] as const;
+const ASSET_TYPES = ['reference', 'certificate', 'cv', 'policy', 'service_description', 'template', 'past_answer', 'past_tender'] as const;
 
 const typeIcons: Record<string, string> = {
   reference: '📋',
@@ -38,6 +38,7 @@ const typeIcons: Record<string, string> = {
   service_description: '📦',
   template: '📄',
   past_answer: '💬',
+  past_tender: '📑',
 };
 
 function ParseStatusIndicator({ status }: { status: string }) {
@@ -115,6 +116,32 @@ export default function CompanyMemory() {
     setLoading(false);
   };
 
+  // Refresh knowledge matching for all active tenders (non-blocking background)
+  const refreshKnowledgeMatching = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) return;
+
+      const { data: tenders } = await supabase
+        .from('tenders')
+        .select('id')
+        .not('status', 'eq', 'draft');
+
+      if (!tenders || tenders.length === 0) return;
+
+      console.log(`Refreshing knowledge matching for ${tenders.length} tenders`);
+      for (const tender of tenders) {
+        supabase.functions.invoke('match-knowledge-assets', {
+          body: { tender_id: tender.id },
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }).catch(err => console.warn('match-knowledge-assets refresh error:', err));
+      }
+    } catch (err) {
+      console.warn('Knowledge refresh error:', err);
+    }
+  };
+
   useEffect(() => { loadAssets(); }, []);
 
   const handleReprocess = async (assetId: string) => {
@@ -154,6 +181,8 @@ export default function CompanyMemory() {
       if (error) throw error;
       setAssets(prev => prev.filter(a => a.id !== deleteTarget.id));
       toast({ title: t('memory.assetDeleted') });
+      // Refresh knowledge matching in background
+      refreshKnowledgeMatching();
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -295,6 +324,8 @@ export default function CompanyMemory() {
       if (successCount > 0) {
         toast({ title: `${successCount} ${t('memory.bulkSuccess')}` });
         await loadAssets();
+        // Refresh knowledge matching in background
+        refreshKnowledgeMatching();
         // Close panel after a short delay if all succeeded
         if (successCount === toUpload.length) {
           setTimeout(() => {

@@ -55,8 +55,10 @@ function overlapScore(a: string, b: string): number {
 function categoryBonus(category: string | null, assetType: string): number {
   if (!category) return 0;
   if (category === "reference" && assetType === "reference") return 15;
-  if (category === "technical" && (assetType === "service_description" || assetType === "past_answer")) return 10;
+  if (category === "technical" && (assetType === "service_description" || assetType === "past_answer" || assetType === "past_tender")) return 10;
   if (category === "commercial" && assetType === "template") return 10;
+  // Past tenders are broadly useful — give a baseline bonus for any category
+  if (assetType === "past_tender") return 8;
   return 0;
 }
 
@@ -68,6 +70,7 @@ function assetTypeBonus(requirementText: string, assetType: string): number {
   if ((text.includes("security") || text.includes("sicherheit") || text.includes("policy")) && assetType === "policy") return 15;
   if ((text.includes("service") || text.includes("leistung") || text.includes("implementation")) && assetType === "service_description") return 15;
   if ((text.includes("cv") || text.includes("lebenslauf") || text.includes("team") || text.includes("qualification")) && assetType === "cv") return 15;
+  if ((text.includes("tender") || text.includes("ausschreibung") || text.includes("rfp") || text.includes("bid") || text.includes("angebot")) && assetType === "past_tender") return 15;
 
   return 0;
 }

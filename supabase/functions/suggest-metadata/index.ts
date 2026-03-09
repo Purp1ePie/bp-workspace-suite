@@ -171,7 +171,7 @@ async function callOpenAI(systemPrompt: string, userContent: string): Promise<an
 const KNOWLEDGE_SYSTEM_PROMPT = `You analyze company knowledge documents and suggest metadata for categorization.
 Given the extracted text from a document file (and its filename), return a JSON object with:
 - "title": A concise, descriptive title for this document (max 80 chars, in the document's language). Do not just repeat the filename.
-- "asset_type": Exactly one of: reference, certificate, cv, policy, service_description, template, past_answer
+- "asset_type": Exactly one of: reference, certificate, cv, policy, service_description, template, past_answer, past_tender
   reference = project references, customer testimonials, case studies
   certificate = ISO certs, quality certifications, awards, accreditations
   cv = resumes, team member profiles, competency profiles
@@ -179,6 +179,7 @@ Given the extracted text from a document file (and its filename), return a JSON 
   service_description = service catalogs, capability descriptions, product sheets
   template = document templates, form templates, proposal templates
   past_answer = previous bid responses, past tender submissions
+  past_tender = completed tenders, past RFPs, previous Ausschreibungen that were submitted
 - "tags": Array of 3-6 relevant keywords in the document's language
 
 Return ONLY valid JSON.`;
@@ -267,7 +268,7 @@ serve(async (req) => {
       );
 
       // Validate and normalize
-      const validTypes = ["reference", "certificate", "cv", "policy", "service_description", "template", "past_answer"];
+      const validTypes = ["reference", "certificate", "cv", "policy", "service_description", "template", "past_answer", "past_tender"];
       if (!validTypes.includes(suggestions.asset_type)) suggestions.asset_type = "reference";
       if (!Array.isArray(suggestions.tags)) suggestions.tags = [];
       if (!suggestions.title) suggestions.title = file_name.replace(/\.[^.]+$/, "");

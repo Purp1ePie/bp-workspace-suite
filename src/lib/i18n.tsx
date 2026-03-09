@@ -204,6 +204,7 @@ const translations = {
   'memory.types.service_description': { de: 'Leistungsbeschreibung', en: 'Service Description' },
   'memory.types.template': { de: 'Vorlage', en: 'Template' },
   'memory.types.past_answer': { de: 'Frühere Antwort', en: 'Past Answer' },
+  'memory.types.past_tender': { de: 'Frühere Ausschreibung', en: 'Past Tender' },
   'memory.totalAssets': { de: 'Total Assets', en: 'Total Assets' },
 
   // Bulk Upload
