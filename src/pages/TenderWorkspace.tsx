@@ -722,6 +722,18 @@ export default function TenderWorkspace() {
     readinessScore >= 60 && conFactors.length <= 1 ? 'bid' :
     readinessScore < 30 || conFactors.length >= 3 ? 'no_bid' : 'neutral';
 
+  // Bid confidence percentage (weighted factors)
+  const bidConfidence = Math.max(0, Math.min(100, Math.round(
+    (knowledgeFit * 0.30) + (requirementsCoverage * 0.35) + ((100 - riskPenalty) * 0.20) + (checklistProgress * 0.15)
+  )));
+
+  // Recommendation explanation text
+  const bidReasonText = aiRecommendation === 'bid'
+    ? t('workspace.recommendBidReason').replace('{coverage}', String(requirementsCoverage)).replace('{fit}', String(knowledgeFit))
+    : aiRecommendation === 'no_bid'
+    ? t('workspace.recommendNoBidReason').replace('{coverage}', String(requirementsCoverage)).replace('{fit}', String(knowledgeFit)).replace('{risks}', String(highRisks))
+    : t('workspace.recommendNeutralReason').replace('{coverage}', String(requirementsCoverage)).replace('{fit}', String(knowledgeFit));
+
   return (
     <div className="animate-fade-in">
       {/* Header */}
@@ -926,27 +938,35 @@ export default function TenderWorkspace() {
                 )}
               </div>
 
-              {/* AI Recommendation */}
+              {/* AI Recommendation with confidence % and explanation */}
               {tender.fit_score != null && (
-                <div className={`rounded-lg p-3 mb-4 ${
+                <div className={`rounded-lg p-4 mb-4 ${
                   aiRecommendation === 'bid' ? 'bg-success/5 border border-success/20' :
                   aiRecommendation === 'no_bid' ? 'bg-destructive/5 border border-destructive/20' :
                   'bg-muted/50 border border-border'
                 }`}>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    <span className="text-xs font-semibold">{t('workspace.aiRecommendation')}</span>
-                    <span className={`text-xs font-medium ${
-                      aiRecommendation === 'bid' ? 'text-success' : aiRecommendation === 'no_bid' ? 'text-destructive' : 'text-muted-foreground'
+                  <div className="flex items-center gap-3 mb-3">
+                    <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold">{t('workspace.aiRecommendation')}</span>
+                        <span className={`text-xs font-bold ${
+                          aiRecommendation === 'bid' ? 'text-success' : aiRecommendation === 'no_bid' ? 'text-destructive' : 'text-muted-foreground'
+                        }`}>
+                          {aiRecommendation === 'bid' ? t('workspace.recommendBid') :
+                           aiRecommendation === 'no_bid' ? t('workspace.recommendNoBid') :
+                           t('workspace.recommendNeutral')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className={`text-right shrink-0 ${
+                      bidConfidence >= 60 ? 'text-success' : bidConfidence >= 35 ? 'text-warning' : 'text-destructive'
                     }`}>
-                      {aiRecommendation === 'bid' ? t('workspace.recommendBid') :
-                       aiRecommendation === 'no_bid' ? t('workspace.recommendNoBid') :
-                       t('workspace.recommendNeutral')}
-                    </span>
+                      <p className="text-2xl font-bold font-heading">{bidConfidence}%</p>
+                      <p className="text-[10px] text-muted-foreground">{t('workspace.bidConfidence')}</p>
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {t('workspace.readinessScore')}: {readinessScore}% | {t('workspace.fitScore')}: {knowledgeFit}%
-                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{bidReasonText}</p>
                 </div>
               )}
 

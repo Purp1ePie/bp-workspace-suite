@@ -9,8 +9,9 @@ import { Button } from '@/components/ui/button';
 import {
   FolderPlus, Clock, Upload, BarChart3, ArrowRight,
   Folders, CalendarClock, FileText, CheckSquare,
-  Gauge, Target, Users, TrendingUp,
+  Gauge, Target, Users, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow, format } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
 import type { Tables } from '@/integrations/supabase/types';
@@ -36,6 +37,22 @@ export default function Dashboard() {
   const [allChecklistItems, setAllChecklistItems] = useState<ChecklistItem[]>([]);
   const [members, setMembers] = useState<MemberSlim[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedStage, setExpandedStage] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  // Status change handler for pipeline
+  const handleStatusChange = async (tenderId: string, newStatus: string) => {
+    const { error } = await supabase
+      .from('tenders')
+      .update({ status: newStatus })
+      .eq('id', tenderId);
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
+      setTenders(prev => prev.map(t => t.id === tenderId ? { ...t, status: newStatus } : t));
+      toast({ title: t('dashboard.statusChanged') });
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -86,23 +103,20 @@ export default function Dashboard() {
   const activeTenders = tenders.filter(t => ['new', 'in_progress'].includes(t.status));
   const dateFnsLocale = language === 'de' ? de : enUS;
 
-  const statusCounts = tenders.reduce<Record<string, number>>((acc, t) => {
-    acc[t.status] = (acc[t.status] || 0) + 1;
-    return acc;
-  }, {});
-
-  // Pipeline stages
-  const pipelineCounts = useMemo(() => {
+  // Pipeline stages with target status for moving tenders
+  const pipelineStages = useMemo(() => {
     const stages = [
-      { key: 'draft', statuses: ['new', 'draft'], label: t('dashboard.stageDraft'), color: 'bg-muted' },
-      { key: 'in_progress', statuses: ['in_progress', 'analyzing'], label: t('dashboard.stageInProgress'), color: 'bg-warning/15' },
-      { key: 'review', statuses: ['review', 'in_review', 'ready_for_review'], label: t('dashboard.stageReview'), color: 'bg-primary/15' },
-      { key: 'submitted', statuses: ['submitted'], label: t('dashboard.stageSubmitted'), color: 'bg-info/15' },
-      { key: 'decided', statuses: ['won', 'lost'], label: t('dashboard.stageDecided'), color: 'bg-success/15' },
+      { key: 'draft', statuses: ['new', 'draft'], targetStatus: 'new', label: t('dashboard.stageDraft'), color: 'bg-muted', borderColor: 'border-muted-foreground/20' },
+      { key: 'in_progress', statuses: ['in_progress', 'analyzing'], targetStatus: 'in_progress', label: t('dashboard.stageInProgress'), color: 'bg-warning/15', borderColor: 'border-warning/30' },
+      { key: 'review', statuses: ['review', 'in_review', 'ready_for_review'], targetStatus: 'ready_for_review', label: t('dashboard.stageReview'), color: 'bg-primary/15', borderColor: 'border-primary/30' },
+      { key: 'submitted', statuses: ['submitted'], targetStatus: 'submitted', label: t('dashboard.stageSubmitted'), color: 'bg-info/15', borderColor: 'border-info/30' },
+      { key: 'won', statuses: ['won'], targetStatus: 'won', label: t('status.won'), color: 'bg-success/15', borderColor: 'border-success/30' },
+      { key: 'lost', statuses: ['lost'], targetStatus: 'lost', label: t('status.lost'), color: 'bg-destructive/15', borderColor: 'border-destructive/30' },
     ];
     return stages.map(stage => ({
       ...stage,
       count: tenders.filter(t => stage.statuses.includes(t.status)).length,
+      tenders: tenders.filter(t => stage.statuses.includes(t.status)),
     }));
   }, [tenders, t]);
 
@@ -193,7 +207,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Pipeline View */}
+      {/* Interactive Pipeline View */}
       {tenders.length > 0 && (
         <div className="glass-card p-5">
           <div className="flex items-center gap-2 mb-4">
@@ -201,13 +215,23 @@ export default function Dashboard() {
             <h2 className="font-semibold font-heading text-sm">{t('dashboard.pipeline')}</h2>
           </div>
           <div className="flex items-stretch gap-0">
-            {pipelineCounts.map((stage, i) => (
+            {pipelineStages.map((stage, i) => (
               <div key={stage.key} className="contents">
-                <div className={`flex-1 text-center p-3 rounded-lg ${stage.color} border border-border/30`}>
+                <button
+                  onClick={() => setExpandedStage(expandedStage === stage.key ? null : stage.key)}
+                  className={`flex-1 text-center p-3 rounded-lg ${stage.color} border transition-all ${
+                    expandedStage === stage.key ? stage.borderColor + ' ring-1 ring-primary/30' : 'border-border/30 hover:border-border/60'
+                  }`}
+                >
                   <p className="text-xl font-bold font-heading">{stage.count}</p>
                   <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{stage.label}</p>
-                </div>
-                {i < pipelineCounts.length - 1 && (
+                  {stage.count > 0 && (
+                    expandedStage === stage.key
+                      ? <ChevronUp className="h-3 w-3 text-muted-foreground/50 mx-auto mt-1" />
+                      : <ChevronDown className="h-3 w-3 text-muted-foreground/50 mx-auto mt-1" />
+                  )}
+                </button>
+                {i < pipelineStages.length - 1 && (
                   <div className="flex items-center px-1">
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40" />
                   </div>
@@ -215,6 +239,43 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+
+          {/* Expanded stage: show tenders with status change */}
+          {expandedStage && (() => {
+            const stage = pipelineStages.find(s => s.key === expandedStage);
+            if (!stage || stage.tenders.length === 0) return null;
+            return (
+              <div className="mt-4 border-t border-border pt-4 space-y-2">
+                {stage.tenders.map(tender => (
+                  <div key={tender.id} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent/30 transition-colors">
+                    <Link to={`/tenders/${tender.id}`} className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate hover:text-primary transition-colors">{tender.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{tender.issuer || '—'}</p>
+                    </Link>
+                    {tender.fit_score != null && (
+                      <span className="text-xs font-medium text-primary shrink-0">{tender.fit_score}%</span>
+                    )}
+                    {/* Status change dropdown */}
+                    <select
+                      value={tender.status}
+                      onChange={(e) => handleStatusChange(tender.id, e.target.value)}
+                      className="text-xs bg-muted border border-border rounded-md px-2 py-1 text-foreground shrink-0 cursor-pointer hover:bg-accent transition-colors"
+                    >
+                      <option value="new">{t('dashboard.stageDraft')}</option>
+                      <option value="in_progress">{t('dashboard.stageInProgress')}</option>
+                      <option value="ready_for_review">{t('dashboard.stageReview')}</option>
+                      <option value="submitted">{t('dashboard.stageSubmitted')}</option>
+                      <option value="won">{t('status.won')}</option>
+                      <option value="lost">{t('status.lost')}</option>
+                    </select>
+                    <Link to={`/tenders/${tender.id}`} className="shrink-0">
+                      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground hover:text-primary transition-colors" />
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -295,24 +356,6 @@ export default function Dashboard() {
           )}
         </div>
       </div>
-
-      {/* Bid Status Summary */}
-      {Object.keys(statusCounts).length > 0 && (
-        <div className="glass-card p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 className="h-4 w-4 text-primary" />
-            <h2 className="font-semibold font-heading text-sm">{t('dashboard.bidStatus')}</h2>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {Object.entries(statusCounts).map(([status, count]) => (
-              <div key={status} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted">
-                <StatusBadge status={status} />
-                <span className="text-sm font-semibold font-heading">{count}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Active Tenders */}
