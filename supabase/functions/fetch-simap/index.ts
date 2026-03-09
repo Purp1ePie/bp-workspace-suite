@@ -161,6 +161,22 @@ serve(async (req: Request) => {
       deadline = project.lots[0]?.offerDeadline || project.lots[0]?.deadline || null;
     }
 
+    // Extract canton
+    const canton = project.orderAddress?.canton || project.orderAddress?.cantonId || null;
+
+    // Extract CPV codes from lots
+    const cpvCodes: string[] = [];
+    if (project.lots && Array.isArray(project.lots)) {
+      for (const lot of project.lots) {
+        if (lot.cpvCodes && Array.isArray(lot.cpvCodes)) {
+          cpvCodes.push(...lot.cpvCodes);
+        }
+      }
+    }
+    if (project.cpvCodes && Array.isArray(project.cpvCodes)) {
+      cpvCodes.push(...project.cpvCodes);
+    }
+
     // Detect language from title Translation object
     let language = "de";
     if (project.title && typeof project.title === "object") {
@@ -169,9 +185,67 @@ serve(async (req: Request) => {
       else if (project.title.en && !project.title.de) language = "en";
     }
 
-    const tenderType = project.projectType === "PUBLIC" || project.processType?.includes("OPEN")
-      ? "public"
-      : "public"; // SIMAP is public procurement by default
+    // Build synthetic description from available metadata
+    const descParts: string[] = [];
+    const projectType = project.projectType || null;
+    const projectSubType = project.projectSubType || null;
+    const processType = project.processType || null;
+    const publicationNumber = project.publicationNumber || project.projectNumber || null;
+
+    // Type info
+    const typeLabels: Record<string, Record<string, string>> = {
+      de: { tender: "Ausschreibung", award: "Zuschlag", cancel: "Abbruch", correction: "Berichtigung" },
+      fr: { tender: "Appel d'offres", award: "Adjudication", cancel: "Interruption", correction: "Rectification" },
+      en: { tender: "Tender", award: "Award", cancel: "Cancellation", correction: "Correction" },
+    };
+    const subTypeLabels: Record<string, Record<string, string>> = {
+      de: { construction: "Bauleistung", supply: "Lieferung", service: "Dienstleistung" },
+      fr: { construction: "Construction", supply: "Fourniture", service: "Service" },
+      en: { construction: "Construction", supply: "Supply", service: "Service" },
+    };
+    const processLabels: Record<string, Record<string, string>> = {
+      de: { open: "Offenes Verfahren", selective: "Selektives Verfahren", invitation: "Einladungsverfahren", free: "Freihändiges Verfahren" },
+      fr: { open: "Procédure ouverte", selective: "Procédure sélective", invitation: "Procédure sur invitation", free: "Procédure de gré à gré" },
+      en: { open: "Open procedure", selective: "Selective procedure", invitation: "Invitation procedure", free: "Direct award" },
+    };
+
+    const lang = language === "it" ? "de" : language; // fallback for IT
+    if (projectType) {
+      const label = typeLabels[lang]?.[projectType] || projectType;
+      descParts.push(label);
+    }
+    if (projectSubType) {
+      const label = subTypeLabels[lang]?.[projectSubType] || projectSubType;
+      descParts.push(`(${label})`);
+    }
+    if (processType) {
+      const label = processLabels[lang]?.[processType] || processType;
+      descParts.push(`— ${label}`);
+    }
+
+    let description = descParts.join(" ");
+    if (publicationNumber) {
+      description += description ? ` | Nr. ${publicationNumber}` : `Nr. ${publicationNumber}`;
+    }
+    if (canton) {
+      description += ` | ${canton}`;
+    }
+    if (cpvCodes.length > 0) {
+      description += ` | CPV: ${cpvCodes.slice(0, 3).join(", ")}`;
+    }
+
+    // Extract lot titles for additional context
+    if (project.lots && Array.isArray(project.lots) && project.lots.length > 0) {
+      const lotTitles = project.lots
+        .map((lot: any) => pickTranslation(lot.title))
+        .filter(Boolean)
+        .slice(0, 3);
+      if (lotTitles.length > 0) {
+        description += `\n${language === "de" ? "Lose" : language === "fr" ? "Lots" : "Lots"}: ${lotTitles.join("; ")}`;
+      }
+    }
+
+    const tenderType = "public"; // SIMAP is public procurement
 
     return new Response(
       JSON.stringify({
@@ -179,8 +253,15 @@ serve(async (req: Request) => {
         data: {
           title,
           issuer,
+          description: description || null,
           deadline,
           language,
+          canton,
+          cpv_codes: [...new Set(cpvCodes)],
+          project_type: projectType,
+          process_type: processType,
+          project_sub_type: projectSubType,
+          publication_number: publicationNumber,
           tender_type: tenderType,
           simap_project_id: resolvedId,
           simap_url: simap_url || `https://www.simap.ch/publications/project/${resolvedId}`,

@@ -96,9 +96,7 @@ export default function SIMAPDiscovery() {
         // Fall back to search result data
       }
 
-      const description = richData?.raw_data
-        ? (pickTranslation(richData.raw_data.description) || pickTranslation(richData.raw_data.shortDescription) || item.description)
-        : item.description;
+      const description = richData?.description || item.description || null;
 
       const { data: tender, error } = await supabase
         .from('tenders')
@@ -199,12 +197,12 @@ export default function SIMAPDiscovery() {
                   {item.description && (
                     <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2">{item.description}</p>
                   )}
-                  <div className="flex items-center gap-4 mt-2">
+                  <div className="flex items-center flex-wrap gap-3 mt-2">
                     {item.publication_date && (
                       <div className="flex items-center gap-1">
                         <Calendar className="h-3 w-3 text-muted-foreground" />
                         <span className="text-xs text-muted-foreground">
-                          {t('discover.publicationDate')}: {format(new Date(item.publication_date), 'dd.MM.yyyy')}
+                          {format(new Date(item.publication_date), 'dd.MM.yyyy')}
                         </span>
                       </div>
                     )}
@@ -215,6 +213,11 @@ export default function SIMAPDiscovery() {
                           {t('tender.deadline')}: {format(new Date(item.deadline), 'dd.MM.yyyy')}
                         </span>
                       </div>
+                    )}
+                    {item.project_type && (
+                      <span className="text-xs capitalize px-2 py-0.5 rounded bg-primary/10 text-primary">
+                        {item.project_type}
+                      </span>
                     )}
                     {item.process_type && (
                       <span className="text-xs capitalize px-2 py-0.5 rounded bg-muted text-muted-foreground">
