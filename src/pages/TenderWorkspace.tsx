@@ -1500,49 +1500,91 @@ export default function TenderWorkspace() {
         )}
 
         {/* REQUIREMENTS */}
-        {activeTab === 'requirements' && (
-          requirements.length === 0 ? (
+        {activeTab === 'requirements' && (() => {
+          // Build a set of requirement IDs that have at least one non-rejected match
+          const fulfilledReqIds = new Set(
+            matches
+              .filter(m => m.status !== 'rejected' && (m.confidence_score ?? 0) >= 40)
+              .map(m => m.requirement_id)
+          );
+          const fulfilledCount = requirements.filter(r => fulfilledReqIds.has(r.id)).length;
+
+          return requirements.length === 0 ? (
             <EmptyState icon={List} title={t('workspace.noRequirements')} description={pendingDocs > 0 ? t('workspace.processingHint') : undefined} />
           ) : (
             <div className="space-y-4">
               {/* Req stats */}
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                 <span>{requirements.length} {t('workspace.requirements').toLowerCase()}</span>
                 <span className="w-px h-3 bg-border" />
                 <span className="text-destructive font-medium">{mandatoryReqs} {t('workspace.mandatory').toLowerCase()}</span>
                 <span>{requirements.length - mandatoryReqs} {t('workspace.optional').toLowerCase()}</span>
+                {matches.length > 0 && (
+                  <>
+                    <span className="w-px h-3 bg-border" />
+                    <span className="flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3 text-success" />
+                      <span className="text-success font-medium">
+                        {t('workspace.reqFulfilledCount')
+                          .replace('{count}', String(fulfilledCount))
+                          .replace('{total}', String(requirements.length))}
+                      </span>
+                    </span>
+                  </>
+                )}
               </div>
 
               <div className="space-y-2">
-                {requirements.map((r, idx) => (
-                  <div key={r.id} className="glass-card px-5 py-4 hover:border-primary/20 transition-colors">
-                    <div className="flex items-start gap-3">
-                      <span className="flex items-center justify-center h-6 w-6 rounded bg-muted text-[10px] font-bold text-muted-foreground shrink-0 mt-0.5">
-                        {idx + 1}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm leading-relaxed">{r.text}</p>
-                        <div className="flex items-center gap-2 mt-2.5">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${
-                            r.mandatory ? 'bg-destructive/15 text-destructive' : 'bg-muted text-muted-foreground'
-                          }`}>
-                            {r.mandatory ? t('workspace.mandatory') : t('workspace.optional')}
-                          </span>
-                          {r.category && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium flex items-center gap-1">
-                              <Tag className="h-2.5 w-2.5" />
-                              {r.category}
+                {requirements.map((r, idx) => {
+                  const isFulfilled = fulfilledReqIds.has(r.id);
+                  const reqMatches = matches.filter(m => m.requirement_id === r.id && m.status !== 'rejected');
+                  const bestScore = reqMatches.length > 0 ? Math.max(...reqMatches.map(m => m.confidence_score ?? 0)) : 0;
+
+                  return (
+                    <div key={r.id} className={`glass-card px-5 py-4 hover:border-primary/20 transition-colors ${
+                      matches.length > 0 ? (isFulfilled ? 'border-l-2 border-l-success/50' : 'border-l-2 border-l-destructive/30') : ''
+                    }`}>
+                      <div className="flex items-start gap-3">
+                        <span className="flex items-center justify-center h-6 w-6 rounded bg-muted text-[10px] font-bold text-muted-foreground shrink-0 mt-0.5">
+                          {idx + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm leading-relaxed">{r.text}</p>
+                          <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${
+                              r.mandatory ? 'bg-destructive/15 text-destructive' : 'bg-muted text-muted-foreground'
+                            }`}>
+                              {r.mandatory ? t('workspace.mandatory') : t('workspace.optional')}
                             </span>
-                          )}
+                            {r.category && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium flex items-center gap-1">
+                                <Tag className="h-2.5 w-2.5" />
+                                {r.category}
+                              </span>
+                            )}
+                            {matches.length > 0 && (
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold flex items-center gap-1 ${
+                                isFulfilled
+                                  ? 'bg-success/15 text-success'
+                                  : 'bg-destructive/10 text-destructive'
+                              }`}>
+                                {isFulfilled ? (
+                                  <><CheckCircle2 className="h-2.5 w-2.5" />{t('workspace.fulfilled')} ({bestScore}%)</>
+                                ) : (
+                                  <><XCircle className="h-2.5 w-2.5" />{t('workspace.unfulfilled')}</>
+                                )}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
-          )
-        )}
+          );
+        })()}
 
         {/* RISKS & DEADLINES */}
         {activeTab === 'risks' && (

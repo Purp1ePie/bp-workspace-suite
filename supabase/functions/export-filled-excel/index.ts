@@ -246,10 +246,7 @@ function escapeXml(str: string): string {
 /**
  * Modify a worksheet XML to fill in cells with new values.
  * Uses inline strings (t="inlineStr") to avoid shared string table changes.
- *
- * Handles two cell formats:
- *   Self-closing: <c r="B3" s="3" t="n" />
- *   Full element: <c r="B3" s="3" t="s"><v>0</v></c>
+ * Preserves cell styles and ensures correct column ordering within rows.
  */
 function modifyWorksheetXml(
   xml: string,
@@ -258,16 +255,37 @@ function modifyWorksheetXml(
 ): string {
   let modified = xml;
 
+  // Track all columns touched (for dimension update)
+  let maxColIdx = 0;
+  let maxRowNum = 0;
+
   for (const mapping of mappings) {
     if (mapping.sheet !== sheetName) continue;
 
     const cellRef = mapping.cell;
+    const { col, row } = parseCellRef(cellRef);
+    const colIdx = colToIndex(col);
+    if (colIdx > maxColIdx) maxColIdx = colIdx;
+    if (row > maxRowNum) maxRowNum = row;
+
     const escapedValue = escapeXml(mapping.value);
-    const inlineContent = `<c r="${cellRef}" t="inlineStr"><is><t>${escapedValue}</t></is></c>`;
+
+    // Try to extract existing style attribute from the cell
+    const existingCellRegex = new RegExp(
+      `<c\\s[^>]*?r="${cellRef}"[^>]*(?:/>|>[\\s\\S]*?</c>)`,
+    );
+    const existingMatch = modified.match(existingCellRegex);
+    let styleAttr = "";
+    if (existingMatch) {
+      const sMatch = existingMatch[0].match(/\bs="(\d+)"/);
+      if (sMatch) styleAttr = ` s="${sMatch[1]}"`;
+    }
+
+    const inlineContent = `<c r="${cellRef}"${styleAttr} t="inlineStr"><is><t>${escapedValue}</t></is></c>`;
 
     // Match self-closing cell: <c r="B3" ... />
     const selfClosingRegex = new RegExp(
-      `<c\\s[^>]*?r="${cellRef}"[^/]*/>`,
+      `<c\\s[^>]*?r="${cellRef}"\\s*[^>]*?/>`,
     );
     // Match full cell element: <c r="B3" ...>...</c>
     const fullElementRegex = new RegExp(
@@ -279,34 +297,73 @@ function modifyWorksheetXml(
     } else if (fullElementRegex.test(modified)) {
       modified = modified.replace(fullElementRegex, inlineContent);
     } else {
-      // Cell doesn't exist — insert into the correct row
-      const { row } = parseCellRef(cellRef);
-      // Try matching row by r="N" attribute
-      const rowOpenRegex = new RegExp(`(<row[^>]*?\\br="${row}"[^>]*>)`);
-      if (rowOpenRegex.test(modified)) {
-        modified = modified.replace(rowOpenRegex, `$1${inlineContent}`);
-      } else {
-        // Try matching by row number in spans attribute or just any row with the number
-        const rowLooseRegex = new RegExp(`(<row\\s[^>]*>)`, "g");
-        let found = false;
-        const rowMatches = [...modified.matchAll(/<row[\s>][^]*?<\/row>/g)];
-        for (const rm of rowMatches) {
-          const rAttr = rm[0].match(/\br="(\d+)"/);
-          if (rAttr && rAttr[1] === String(row)) {
-            const rowOpen = rm[0].match(/<row[^>]*>/);
-            if (rowOpen) {
-              modified = modified.replace(rowOpen[0], rowOpen[0] + inlineContent);
-              found = true;
-              break;
-            }
+      // Cell doesn't exist — insert into the correct position within the row
+      // Find the row in the XML
+      const rowRegex = new RegExp(
+        `(<row\\b[^>]*?\\br="${row}"[^>]*>)([\\s\\S]*?)(</row>)`,
+      );
+      const rowMatch = modified.match(rowRegex);
+
+      if (rowMatch) {
+        const rowOpen = rowMatch[1];
+        const rowContent = rowMatch[2];
+        const rowClose = rowMatch[3];
+
+        // Find insertion position: after the last cell whose column index < this cell's column
+        const cellPosRegex = /<c\s[^>]*?r="([A-Z]+)\d+"[^>]*(?:\/>|>[\s\S]*?<\/c>)/g;
+        let lastEnd = 0;
+        let insertAt = 0;
+        let cm;
+        while ((cm = cellPosRegex.exec(rowContent)) !== null) {
+          const existingColIdx = colToIndex(cm[1]);
+          if (existingColIdx < colIdx) {
+            insertAt = cm.index + cm[0].length;
           }
+          lastEnd = cm.index + cm[0].length;
         }
-        if (!found) {
-          // Row doesn't exist — add new row before </sheetData>
-          const newRow = `<row r="${row}">${inlineContent}</row>`;
-          modified = modified.replace("</sheetData>", `${newRow}</sheetData>`);
+
+        // If no cell with smaller column was found, insert at beginning
+        // If all cells have smaller columns, insert at end (after lastEnd)
+        if (insertAt === 0 && lastEnd > 0) {
+          // Check if ALL existing cells have column >= ours
+          const firstCellMatch = rowContent.match(/<c\s[^>]*?r="([A-Z]+)\d+"/);
+          if (firstCellMatch && colToIndex(firstCellMatch[1]) > colIdx) {
+            insertAt = 0; // Insert at very beginning
+          } else {
+            insertAt = lastEnd; // Insert at end
+          }
+        } else if (insertAt === 0 && lastEnd === 0) {
+          insertAt = 0; // Empty row, insert at beginning
         }
+
+        const newRowContent =
+          rowContent.slice(0, insertAt) +
+          inlineContent +
+          rowContent.slice(insertAt);
+        modified = modified.replace(
+          rowMatch[0],
+          rowOpen + newRowContent + rowClose,
+        );
+      } else {
+        // Row doesn't exist — add new row before </sheetData>
+        const newRow = `<row r="${row}">${inlineContent}</row>`;
+        modified = modified.replace("</sheetData>", `${newRow}</sheetData>`);
       }
+    }
+  }
+
+  // Update the dimension tag to encompass new cells
+  if (maxColIdx > 0 || maxRowNum > 0) {
+    const dimRegex = /<dimension\s+ref="([A-Z]+\d+):([A-Z]+)(\d+)"\s*\/>/;
+    const dimMatch = modified.match(dimRegex);
+    if (dimMatch) {
+      const origMaxCol = dimMatch[2];
+      const origMaxRow = parseInt(dimMatch[3], 10);
+      const origMaxColIdx = colToIndex(origMaxCol);
+      const newMaxColIdx = Math.max(origMaxColIdx, maxColIdx);
+      const newMaxRow = Math.max(origMaxRow, maxRowNum);
+      const newDim = `<dimension ref="${dimMatch[1]}:${indexToCol(newMaxColIdx)}${newMaxRow}"/>`;
+      modified = modified.replace(dimMatch[0], newDim);
     }
   }
 
