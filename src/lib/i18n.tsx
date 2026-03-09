@@ -366,6 +366,7 @@ const translations = {
   // Knowledge match UX
   'workspace.matchExplanation': { de: 'Akzeptieren Sie passende Matches oder lehnen Sie unpassende ab. Abgelehnte Matches werden aus der Abdeckungsberechnung entfernt und beeinflussen den Readiness-Score.', en: 'Accept relevant matches or reject irrelevant ones. Rejected matches are excluded from coverage calculations and affect the readiness score.' },
   'workspace.whyMatch': { de: 'Warum dieses Match?', en: 'Why this match?' },
+  'workspace.matchSemantic': { de: 'Kontextuelle Übereinstimmung', en: 'Semantic similarity' },
   'workspace.matchTitleTerms': { de: 'Begriffe im Titel', en: 'Title keyword matches' },
   'workspace.matchTextTerms': { de: 'Begriffe im Inhalt', en: 'Content keyword matches' },
   'workspace.matchTypeBonus': { de: 'Typ-Bonus', en: 'Type bonus' },

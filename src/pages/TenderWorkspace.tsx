@@ -77,18 +77,21 @@ const severityConfig: Record<string, { color: string; dot: string }> = {
   low: { color: 'text-info bg-info/15', dot: 'bg-info' },
 };
 
-function parseMatchReason(reason: string | null): { key: string; value: number }[] {
+function parseMatchReason(reason: string | null): { key: string; value: string }[] {
   if (!reason) return [];
-  const items: { key: string; value: number }[] = [];
+  const items: { key: string; value: string }[] = [];
   const parts = reason.split(',').map(s => s.trim());
   for (const part of parts) {
     const [k, v] = part.split('=');
     if (!k || !v) continue;
+    // Semantic format: "semantic=75%, cat_bonus=10, has_text=true"
+    if (k === 'semantic') items.push({ key: 'matchSemantic', value: v });
+    // Legacy keyword format: "title=2, text=5, type_bonus=15, cat_bonus=0"
     const num = parseInt(v, 10);
-    if (k === 'title' && num > 0) items.push({ key: 'matchTitleTerms', value: num });
-    if (k === 'text' && num > 0) items.push({ key: 'matchTextTerms', value: num });
-    if (k === 'type_bonus' && num > 0) items.push({ key: 'matchTypeBonus', value: num });
-    if (k === 'cat_bonus' && num > 0) items.push({ key: 'matchCatBonus', value: num });
+    if (k === 'title' && num > 0) items.push({ key: 'matchTitleTerms', value: String(num) + '×' });
+    if (k === 'text' && num > 0) items.push({ key: 'matchTextTerms', value: String(num) + '×' });
+    if (k === 'type_bonus' && num > 0) items.push({ key: 'matchTypeBonus', value: '' });
+    if (k === 'cat_bonus' && num > 0) items.push({ key: 'matchCatBonus', value: '' });
   }
   return items;
 }
@@ -1744,7 +1747,7 @@ export default function TenderWorkspace() {
                                       </span>
                                       {reasons.length > 0 && !isExpanded && (
                                         <span className="text-[10px] text-muted-foreground/60">
-                                          {reasons.map(r => `${r.value}× ${t(`workspace.${r.key}` as any)}`).join(' · ')}
+                                          {reasons.map(r => r.value ? `${t(`workspace.${r.key}` as any)} ${r.value}` : t(`workspace.${r.key}` as any)).join(' · ')}
                                         </span>
                                       )}
                                     </div>
@@ -1807,7 +1810,7 @@ export default function TenderWorkspace() {
                                             {reasons.map((r, i) => (
                                               <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
                                                 <CheckCircle2 className="h-3 w-3 text-primary shrink-0" />
-                                                <span>{r.value}× {t(`workspace.${r.key}` as any)}</span>
+                                                <span>{t(`workspace.${r.key}` as any)}{r.value ? ` ${r.value}` : ''}</span>
                                               </div>
                                             ))}
                                           </div>
