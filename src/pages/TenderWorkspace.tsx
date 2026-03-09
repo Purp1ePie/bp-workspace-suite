@@ -11,8 +11,18 @@ import {
   ArrowLeft, FileText, AlertTriangle, CheckSquare, BookOpen, Edit, List,
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
-  Check, X as XIcon, Sparkles, FileSpreadsheet, Download, HelpCircle,
+  Check, X as XIcon, Sparkles, FileSpreadsheet, Download, HelpCircle, Trash2,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { format, formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
 import type { Tables } from '@/integrations/supabase/types';
@@ -312,6 +322,29 @@ export default function TenderWorkspace() {
   const [exportingClarifications, setExportingClarifications] = useState(false);
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [editingQuestionText, setEditingQuestionText] = useState('');
+  const [deleteDocTarget, setDeleteDocTarget] = useState<Doc | null>(null);
+  const [deletingDoc, setDeletingDoc] = useState(false);
+
+  const handleDeleteDocument = async () => {
+    if (!deleteDocTarget) return;
+    setDeletingDoc(true);
+    try {
+      // Delete from storage
+      if (deleteDocTarget.storage_path) {
+        await supabase.storage.from('tender-files').remove([deleteDocTarget.storage_path]);
+      }
+      // Delete DB row
+      const { error } = await supabase.from('tender_documents').delete().eq('id', deleteDocTarget.id);
+      if (error) throw error;
+      toast({ title: t('workspace.documentDeleted') });
+      loadData();
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeletingDoc(false);
+      setDeleteDocTarget(null);
+    }
+  };
 
   const handleGenerateClarifications = async () => {
     if (!id) return;
@@ -779,6 +812,12 @@ export default function TenderWorkspace() {
                         <StatusIcon className={`h-3 w-3 ${d.parse_status === 'processing' ? 'animate-spin' : ''}`} />
                         {t(`workspace.parseStatus.${d.parse_status}` as any) || d.parse_status}
                       </span>
+                      <button
+                        onClick={() => setDeleteDocTarget(d)}
+                        className="text-muted-foreground hover:text-destructive transition-colors p-1.5 rounded hover:bg-destructive/10 shrink-0"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   );
                 })}
@@ -1299,6 +1338,30 @@ export default function TenderWorkspace() {
           )
         )}
       </div>
+
+      <AlertDialog open={!!deleteDocTarget} onOpenChange={(open) => { if (!open) setDeleteDocTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('workspace.deleteDocument')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-medium text-foreground">{deleteDocTarget?.file_name}</span>
+              <br /><br />
+              {t('workspace.deleteDocumentConfirm')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingDoc}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteDocument}
+              disabled={deletingDoc}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingDoc && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              {t('workspace.deleteDocument')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

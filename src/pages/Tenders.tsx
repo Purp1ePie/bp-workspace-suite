@@ -2,11 +2,22 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
+import { useToast } from '@/hooks/use-toast';
 import { StatusBadge } from '@/components/StatusBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
-import { FolderPlus, ArrowRight, Search, Folders } from 'lucide-react';
+import { FolderPlus, ArrowRight, Search, Folders, Trash2, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
 import type { Tables } from '@/integrations/supabase/types';
 
@@ -14,9 +25,12 @@ type Tender = Tables<'tenders'>;
 
 export default function Tenders() {
   const { t } = useI18n();
+  const { toast } = useToast();
   const [tenders, setTenders] = useState<Tender[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<Tender | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -26,6 +40,38 @@ export default function Tenders() {
     };
     load();
   }, []);
+
+  const handleDeleteTender = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      // Get documents to clean up storage files
+      const { data: docs } = await supabase
+        .from('tender_documents')
+        .select('storage_path')
+        .eq('tender_id', deleteTarget.id);
+
+      // Delete storage files
+      if (docs && docs.length > 0) {
+        const paths = docs.map(d => d.storage_path).filter(Boolean);
+        if (paths.length > 0) {
+          await supabase.storage.from('tender-files').remove(paths);
+        }
+      }
+
+      // Delete tender (CASCADE handles all child records)
+      const { error } = await supabase.from('tenders').delete().eq('id', deleteTarget.id);
+      if (error) throw error;
+
+      setTenders(prev => prev.filter(t => t.id !== deleteTarget.id));
+      toast({ title: t('tender.deleteSuccess') });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
+    }
+  };
 
   const filtered = tenders.filter(t =>
     !search || t.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -102,9 +148,17 @@ export default function Tenders() {
                     </span>
                   </td>
                   <td className="px-5 py-3">
-                    <Link to={`/tenders/${tender.id}`}>
-                      <ArrowRight className="h-4 w-4 text-muted-foreground hover:text-primary transition-colors" />
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(tender); }}
+                        className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                      <Link to={`/tenders/${tender.id}`}>
+                        <ArrowRight className="h-4 w-4 text-muted-foreground hover:text-primary transition-colors" />
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -112,6 +166,30 @@ export default function Tenders() {
           </table>
         </div>
       )}
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('tender.deleteTender')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-medium text-foreground">{deleteTarget?.title}</span>
+              <br /><br />
+              {t('tender.deleteConfirm')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteTender}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              {t('tender.deleteTender')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

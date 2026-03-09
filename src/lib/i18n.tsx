@@ -93,6 +93,9 @@ const translations = {
   'tender.goToWorkspace': { de: 'Zum Workspace', en: 'Go to Workspace' },
   'tender.processingTender': { de: 'Ausschreibung wird analysiert...', en: 'Processing tender...' },
   'tender.processingDescription': { de: 'Die KI analysiert Ihre Dokumente. Dies kann einen Moment dauern.', en: 'AI is analyzing your documents. This may take a moment.' },
+  'tender.deleteTender': { de: 'Ausschreibung löschen', en: 'Delete Tender' },
+  'tender.deleteConfirm': { de: 'Diese Ausschreibung und alle zugehörigen Daten (Dokumente, Anforderungen, Entwürfe usw.) werden dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.', en: 'This tender and all associated data (documents, requirements, drafts, etc.) will be permanently deleted. This action cannot be undone.' },
+  'tender.deleteSuccess': { de: 'Ausschreibung gelöscht', en: 'Tender deleted' },
   'workspace.retryProcessing': { de: 'Verarbeitung wiederholen', en: 'Retry Processing' },
 
   // Workspace tabs
@@ -106,6 +109,9 @@ const translations = {
   'workspace.notFound': { de: 'Ausschreibung nicht gefunden', en: 'Tender not found' },
   'workspace.fitScore': { de: 'Fit-Score', en: 'Fit Score' },
   'workspace.bidDecision': { de: 'Bid-Entscheidung', en: 'Bid Decision' },
+  'workspace.deleteDocument': { de: 'Dokument löschen', en: 'Delete Document' },
+  'workspace.deleteDocumentConfirm': { de: 'Dieses Dokument wird dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.', en: 'This document will be permanently deleted. This action cannot be undone.' },
+  'workspace.documentDeleted': { de: 'Dokument gelöscht', en: 'Document deleted' },
   'workspace.noDocuments': { de: 'Noch keine Dokumente hochgeladen', en: 'No documents uploaded yet' },
   'workspace.noRequirements': { de: 'Noch keine Anforderungen extrahiert', en: 'No requirements extracted yet' },
   'workspace.noRisks': { de: 'Keine Risiken identifiziert', en: 'No risks identified' },
