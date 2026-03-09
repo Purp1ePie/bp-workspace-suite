@@ -735,11 +735,12 @@ export default function TenderWorkspace() {
     : t('workspace.recommendNeutralReason').replace('{coverage}', String(requirementsCoverage)).replace('{fit}', String(knowledgeFit));
 
   // Process steps for stepper
-  const processSteps = [
+  const processSteps: { key: string; icon: any; label: string; tab: Tab; completed: boolean; active: boolean; detail: string }[] = [
     {
       key: 'documents',
       icon: FileText,
       label: t('process.documents'),
+      tab: 'documents' as Tab,
       completed: docs.length > 0 && allDocsParsed && !isProcessing,
       active: isProcessing || (docs.length > 0 && !allDocsParsed),
       detail: docs.length === 0
@@ -752,6 +753,7 @@ export default function TenderWorkspace() {
       key: 'analysis',
       icon: List,
       label: t('process.analysis'),
+      tab: 'requirements' as Tab,
       completed: requirements.length > 0,
       active: allDocsParsed && !isProcessing && requirements.length === 0,
       detail: requirements.length > 0
@@ -762,6 +764,7 @@ export default function TenderWorkspace() {
       key: 'matching',
       icon: BookOpen,
       label: t('process.matching'),
+      tab: 'knowledge' as Tab,
       completed: matches.length > 0,
       active: requirements.length > 0 && matches.length === 0,
       detail: matches.length > 0
@@ -772,6 +775,7 @@ export default function TenderWorkspace() {
       key: 'draft',
       icon: Edit,
       label: t('process.draft'),
+      tab: 'draft' as Tab,
       completed: draftedSections > 0,
       active: matches.length > 0 && draftedSections === 0,
       detail: sections.length > 0
@@ -782,6 +786,7 @@ export default function TenderWorkspace() {
       key: 'review',
       icon: CheckSquare,
       label: t('process.review'),
+      tab: 'checklist' as Tab,
       completed: checklistProgress === 100 && tender.bid_decision != null,
       active: draftedSections > 0 && (checklistProgress < 100 || !tender.bid_decision),
       detail: tender.bid_decision
@@ -973,16 +978,18 @@ export default function TenderWorkspace() {
 
                   return (
                     <React.Fragment key={step.key}>
-                      <div className={`flex-1 flex flex-col items-center text-center group ${
-                        isCompleted ? 'cursor-default' : isActive ? 'cursor-default' : 'cursor-default'
-                      }`}>
+                      <button
+                        onClick={() => setActiveTab(step.tab)}
+                        className={`flex-1 flex flex-col items-center text-center group cursor-pointer transition-opacity hover:opacity-80`}
+                        title={`${t('process.goToTab')}: ${step.label}`}
+                      >
                         {/* Step circle */}
-                        <div className={`relative h-10 w-10 rounded-full flex items-center justify-center transition-all duration-300 ${
+                        <div className={`relative h-10 w-10 rounded-full flex items-center justify-center transition-all duration-300 group-hover:scale-110 ${
                           isCompleted
                             ? 'bg-success text-white'
                             : isActive
                             ? 'bg-primary text-white ring-4 ring-primary/20'
-                            : 'bg-muted text-muted-foreground'
+                            : 'bg-muted text-muted-foreground group-hover:bg-muted/80'
                         }`}>
                           {isCompleted ? (
                             <Check className="h-4 w-4" />
@@ -1009,7 +1016,7 @@ export default function TenderWorkspace() {
                             {step.detail}
                           </p>
                         )}
-                      </div>
+                      </button>
                       {/* Connector line */}
                       {i < processSteps.length - 1 && (
                         <div className="flex items-center pt-5 px-0 shrink-0">
