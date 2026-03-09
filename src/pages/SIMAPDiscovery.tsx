@@ -81,6 +81,7 @@ export default function SIMAPDiscovery() {
           issuer: item.issuer || null,
           source_type: 'simap',
           tender_type: 'public',
+          status: 'active',
           deadline: item.deadline ? new Date(item.deadline).toISOString() : null,
           organization_id: orgData,
           simap_url: item.simap_url,
