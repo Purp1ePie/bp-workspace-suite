@@ -261,10 +261,10 @@ serve(async (req) => {
         };
       });
 
-      // Filter: require at least 40% semantic similarity to avoid noise
-      // and a minimum combined score of 35
+      // Filter: require at least 50% semantic similarity — strict threshold
+      // to only show genuinely relevant matches, not superficial overlap
       const topMatches = scored
-        .filter((m) => m.similarity >= 0.40 && m.score >= 35)
+        .filter((m) => m.similarity >= 0.50 && m.score >= 45)
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
 
