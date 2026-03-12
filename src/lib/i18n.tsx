@@ -316,6 +316,19 @@ const translations = {
   'simap.fetchSuccess': { de: 'Daten von SIMAP geladen', en: 'Data loaded from SIMAP' },
   'simap.fetchError': { de: 'Fehler beim Laden von SIMAP', en: 'Error loading from SIMAP' },
 
+  // SIMAP OAuth
+  'simap.connect': { de: 'Mit SIMAP verbinden', en: 'Connect to SIMAP' },
+  'simap.connected': { de: 'Mit SIMAP verbunden', en: 'Connected to SIMAP' },
+  'simap.connectedDesc': { de: 'Authentifizierter Zugriff auf SIMAP-Daten aktiv', en: 'Authenticated access to SIMAP data is active' },
+  'simap.notConnected': { de: 'SIMAP nicht verbunden', en: 'SIMAP not connected' },
+  'simap.connectDesc': { de: 'Verbinden Sie sich mit SIMAP für erweiterten Zugriff auf Ausschreibungsdaten', en: 'Connect to SIMAP for enhanced access to tender data' },
+  'simap.disconnect': { de: 'Trennen', en: 'Disconnect' },
+  'simap.disconnected': { de: 'SIMAP-Verbindung getrennt', en: 'Disconnected from SIMAP' },
+  'simap.connecting': { de: 'Verbindung wird hergestellt...', en: 'Connecting...' },
+  'simap.callbackSuccess': { de: 'SIMAP verbunden', en: 'SIMAP connected' },
+  'simap.callbackSuccessDesc': { de: 'Authentifizierter Zugriff auf SIMAP ist jetzt aktiv', en: 'Authenticated access to SIMAP is now active' },
+  'simap.callbackError': { de: 'SIMAP-Verbindung fehlgeschlagen', en: 'SIMAP connection failed' },
+
   // Discovery page
   'discover.title': { de: 'SIMAP Entdecken', en: 'SIMAP Discovery' },
   'discover.subtitle': { de: 'Öffentliche Ausschreibungen aus SIMAP durchsuchen und importieren', en: 'Search and import public tenders from SIMAP' },

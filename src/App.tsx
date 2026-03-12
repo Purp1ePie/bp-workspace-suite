@@ -18,6 +18,7 @@ import Checklist from "@/pages/Checklist";
 import Settings from "@/pages/Settings";
 import Team from "@/pages/Team";
 import SIMAPDiscovery from "@/pages/SIMAPDiscovery";
+import SIMAPCallback from "@/pages/SIMAPCallback";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -45,6 +46,7 @@ const App = () => (
                 <Route path="/tenders" element={<Tenders />} />
                 <Route path="/tenders/:id" element={<TenderWorkspace />} />
                 <Route path="/discover" element={<SIMAPDiscovery />} />
+                <Route path="/simap/callback" element={<SIMAPCallback />} />
                 <Route path="/memory" element={<CompanyMemory />} />
                 <Route path="/checklist" element={<Checklist />} />
                 <Route path="/team" element={<Team />} />

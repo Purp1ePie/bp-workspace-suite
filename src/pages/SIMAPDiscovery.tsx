@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
@@ -7,8 +7,9 @@ import { useToast } from '@/hooks/use-toast';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Compass, FolderPlus, ExternalLink, Loader2, Calendar, Building2, MapPin } from 'lucide-react';
+import { Search, Compass, FolderPlus, ExternalLink, Loader2, Calendar, Building2, MapPin, Link2, Unlink, CheckCircle2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { startSIMAPAuth } from '@/lib/simapOAuth';
 
 function pickTranslation(t: any, preferredLang = 'de'): string {
   if (!t) return '';
@@ -47,6 +48,43 @@ export default function SIMAPDiscovery() {
   const [importingId, setImportingId] = useState<string | null>(null);
   const [pagination, setPagination] = useState<{ lastItem?: string } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // SIMAP OAuth connection state
+  const [simapConnected, setSimapConnected] = useState(false);
+  const [simapLoading, setSimapLoading] = useState(true);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  useEffect(() => {
+    checkSimapConnection();
+  }, []);
+
+  const checkSimapConnection = async () => {
+    try {
+      const result = await callEdgeFunction('simap-auth', { action: 'status' });
+      setSimapConnected(result.connected === true);
+    } catch {
+      setSimapConnected(false);
+    } finally {
+      setSimapLoading(false);
+    }
+  };
+
+  const handleConnect = async () => {
+    await startSIMAPAuth();
+  };
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    try {
+      await callEdgeFunction('simap-auth', { action: 'disconnect' });
+      setSimapConnected(false);
+      toast({ title: t('simap.disconnected') });
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setDisconnecting(false);
+    }
+  };
 
   const handleSearch = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -144,6 +182,53 @@ export default function SIMAPDiscovery() {
         <h1 className="text-2xl font-bold font-heading">{t('discover.title')}</h1>
         <p className="text-sm text-muted-foreground mt-1">{t('discover.subtitle')}</p>
       </div>
+
+      {/* SIMAP Connection Status */}
+      {!simapLoading && (
+        <div className={`glass-card p-4 mb-4 flex items-center justify-between ${
+          simapConnected ? 'border-success/30' : 'border-primary/20'
+        }`}>
+          <div className="flex items-center gap-3">
+            {simapConnected ? (
+              <>
+                <CheckCircle2 className="h-4 w-4 text-success" />
+                <div>
+                  <span className="text-sm font-medium text-success">{t('simap.connected')}</span>
+                  <p className="text-xs text-muted-foreground">{t('simap.connectedDesc')}</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <Link2 className="h-4 w-4 text-muted-foreground" />
+                <div>
+                  <span className="text-sm font-medium">{t('simap.notConnected')}</span>
+                  <p className="text-xs text-muted-foreground">{t('simap.connectDesc')}</p>
+                </div>
+              </>
+            )}
+          </div>
+          {simapConnected ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+            >
+              {disconnecting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+              ) : (
+                <Unlink className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              {t('simap.disconnect')}
+            </Button>
+          ) : (
+            <Button size="sm" onClick={handleConnect}>
+              <Link2 className="h-3.5 w-3.5 mr-1.5" />
+              {t('simap.connect')}
+            </Button>
+          )}
+        </div>
+      )}
 
       <form onSubmit={handleSearch} className="glass-card p-4 mb-6">
         <div className="flex gap-2">

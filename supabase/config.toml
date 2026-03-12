@@ -66,3 +66,8 @@ entrypoint = "./functions/search-simap/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/fetch-simap/index.ts"
+
+[functions.simap-auth]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/simap-auth/index.ts"

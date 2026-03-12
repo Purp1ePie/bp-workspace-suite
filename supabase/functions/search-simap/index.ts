@@ -48,6 +48,7 @@ serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -59,6 +60,60 @@ serve(async (req: Request) => {
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+
+    // Load SIMAP OAuth token if available
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    const { data: profile } = await adminClient
+      .from("profiles")
+      .select("organization_id")
+      .eq("id", user.id)
+      .single();
+
+    let simapToken: string | null = null;
+    if (profile?.organization_id) {
+      const { data: conn } = await adminClient
+        .from("simap_connections")
+        .select("access_token, refresh_token, token_expires_at")
+        .eq("organization_id", profile.organization_id)
+        .single();
+
+      if (conn) {
+        if (new Date(conn.token_expires_at) < new Date() && conn.refresh_token) {
+          // Try to refresh expired token
+          try {
+            const refreshResp = await fetch(
+              "https://www.simap.ch/auth/realms/simap/protocol/openid-connect/token",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                  grant_type: "refresh_token",
+                  client_id: "bidpilot-tenders",
+                  refresh_token: conn.refresh_token,
+                }).toString(),
+              },
+            );
+            if (refreshResp.ok) {
+              const tokenData = await refreshResp.json();
+              simapToken = tokenData.access_token;
+              await adminClient.from("simap_connections").update({
+                access_token: tokenData.access_token,
+                refresh_token: tokenData.refresh_token || conn.refresh_token,
+                token_expires_at: new Date(Date.now() + (tokenData.expires_in || 300) * 1000).toISOString(),
+                updated_at: new Date().toISOString(),
+              }).eq("organization_id", profile.organization_id);
+              console.log("[search-simap] Token refreshed");
+            }
+          } catch (e) {
+            console.log("[search-simap] Token refresh failed:", e);
+          }
+        } else if (new Date(conn.token_expires_at) >= new Date()) {
+          simapToken = conn.access_token;
+        }
+      }
+    }
+
+    console.log(`[search-simap] Using ${simapToken ? "authenticated" : "unauthenticated"} mode`);
 
     // Build SIMAP search URL — try endpoint paths in order
     const params = new URLSearchParams();
@@ -86,6 +141,7 @@ serve(async (req: Request) => {
         headers: {
           "Accept": "application/json",
           "Content-Type": "application/json",
+          ...(simapToken ? { "Authorization": `Bearer ${simapToken}` } : {}),
         },
       });
 
