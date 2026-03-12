@@ -217,13 +217,15 @@ serve(async (req: Request) => {
         canton,
         cpv_codes: cpvCodes,
         language,
-        simap_url: `https://www.simap.ch/publications/project/${projectId}`,
+        has_documents: p.hasProjectDocuments || false,
+        simap_url: `https://www.simap.ch/${language}/project-detail/${projectId}`,
       };
     });
 
     return new Response(
       JSON.stringify({
         success: true,
+        authenticated: !!simapToken,
         results,
         pagination: data.pagination || null,
       }),

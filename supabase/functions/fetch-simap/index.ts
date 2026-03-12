@@ -29,8 +29,8 @@ function extractProjectId(simapUrl: string): string | null {
     // Try query param: ?projectId=...
     const fromParam = url.searchParams.get("projectId") || url.searchParams.get("project");
     if (fromParam) return fromParam;
-    // Try path: /publications/project/{id} or /project/{id}
-    const match = url.pathname.match(/\/project[s]?\/([a-zA-Z0-9-]+)/);
+    // Try path: /project-detail/{id} or /publications/project/{id} or /project/{id}
+    const match = url.pathname.match(/\/(?:project-detail|project[s]?)\/([a-zA-Z0-9-]+)/);
     if (match) return match[1];
     return null;
   } catch {
@@ -346,7 +346,8 @@ serve(async (req: Request) => {
           publication_number: publicationNumber,
           tender_type: tenderType,
           simap_project_id: resolvedId,
-          simap_url: simap_url || `https://www.simap.ch/publications/project/${resolvedId}`,
+          has_documents: project.hasProjectDocuments || false,
+          simap_url: simap_url || `https://www.simap.ch/${language}/project-detail/${resolvedId}`,
           raw_data: project,
         },
       }),

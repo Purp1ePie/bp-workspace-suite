@@ -7,15 +7,19 @@ import { useToast } from '@/hooks/use-toast';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Compass, FolderPlus, ExternalLink, Loader2, Calendar, Building2, MapPin, Link2, Unlink, CheckCircle2 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Search, Compass, FolderPlus, ExternalLink, Loader2, Calendar, Building2, MapPin, Link2, Unlink, CheckCircle2, Paperclip, Lock, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import { startSIMAPAuth } from '@/lib/simapOAuth';
-
-function pickTranslation(t: any, preferredLang = 'de'): string {
-  if (!t) return '';
-  if (typeof t === 'string') return t;
-  return t[preferredLang] || t.de || t.fr || t.en || t.it || Object.values(t).find(Boolean) || '';
-}
 
 interface SimapResult {
   project_id: string;
@@ -34,6 +38,24 @@ interface SimapResult {
   cpv_codes: string[];
   language: string;
   simap_url: string;
+  has_documents: boolean;
+}
+
+interface SimapDocument {
+  id: string;
+  name: string;
+  size: number | null;
+  type: string | null;
+  lot_id: string | null;
+  lot_title: string | null;
+  category: string | null;
+}
+
+function formatFileSize(bytes: number | null): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export default function SIMAPDiscovery() {
@@ -48,11 +70,19 @@ export default function SIMAPDiscovery() {
   const [importingId, setImportingId] = useState<string | null>(null);
   const [pagination, setPagination] = useState<{ lastItem?: string } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   // SIMAP OAuth connection state
   const [simapConnected, setSimapConnected] = useState(false);
   const [simapLoading, setSimapLoading] = useState(true);
   const [disconnecting, setDisconnecting] = useState(false);
+
+  // Document picker state
+  const [docPickerOpen, setDocPickerOpen] = useState(false);
+  const [docPickerTarget, setDocPickerTarget] = useState<SimapResult | null>(null);
+  const [simapDocuments, setSimapDocuments] = useState<SimapDocument[]>([]);
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
+  const [loadingDocs, setLoadingDocs] = useState(false);
 
   useEffect(() => {
     checkSimapConnection();
@@ -78,6 +108,7 @@ export default function SIMAPDiscovery() {
     try {
       await callEdgeFunction('simap-auth', { action: 'disconnect' });
       setSimapConnected(false);
+      setIsAuthenticated(false);
       toast({ title: t('simap.disconnected') });
     } catch (err: any) {
       toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
@@ -95,6 +126,7 @@ export default function SIMAPDiscovery() {
       const result = await callEdgeFunction('search-simap', { query: query.trim() });
       setResults(result.results || []);
       setPagination(result.pagination || null);
+      setIsAuthenticated(result.authenticated === true);
     } catch (err: any) {
       toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
       setResults([]);
@@ -121,6 +153,48 @@ export default function SIMAPDiscovery() {
   };
 
   const handleImport = async (item: SimapResult) => {
+    // If authenticated, try to list documents (search API may not include has_documents)
+    if (isAuthenticated) {
+      setDocPickerTarget(item);
+      setDocPickerOpen(true);
+      setLoadingDocs(true);
+      setSimapDocuments([]);
+      setSelectedDocIds(new Set());
+
+      try {
+        const result = await callEdgeFunction('simap-documents', {
+          action: 'list',
+          simap_project_id: item.project_id,
+        });
+        const docs = result.documents || [];
+        if (docs.length === 0) {
+          // No documents available — proceed directly without dialog
+          setDocPickerOpen(false);
+          setDocPickerTarget(null);
+          await proceedImport(item, []);
+          return;
+        }
+        setSimapDocuments(docs);
+        setSelectedDocIds(new Set(docs.map((d: SimapDocument) => d.id)));
+      } catch (err: any) {
+        // Document listing failed (e.g., 403, API error) — proceed without documents
+        console.warn('Failed to list SIMAP documents:', err);
+        setDocPickerOpen(false);
+        setDocPickerTarget(null);
+        await proceedImport(item, []);
+        return;
+      } finally {
+        setLoadingDocs(false);
+      }
+      return;
+    }
+
+    // Not authenticated — proceed directly
+    await proceedImport(item, []);
+  };
+
+  const proceedImport = async (item: SimapResult, docIds: string[]) => {
+    setDocPickerOpen(false);
     setImportingId(item.project_id);
     try {
       const { data: orgData } = await supabase.rpc('current_organization_id');
@@ -163,16 +237,56 @@ export default function SIMAPDiscovery() {
 
       if (error) throw error;
 
-      toast({
-        title: t('discover.imported'),
-        description: t('discover.importedDescription'),
-      });
+      // Download selected SIMAP documents in background (non-blocking)
+      if (docIds.length > 0) {
+        callEdgeFunction('simap-documents', {
+          action: 'download-all',
+          simap_project_id: item.project_id,
+          tender_id: tender.id,
+          document_ids: docIds,
+        }).then((result) => {
+          const count = result.documents?.length || 0;
+          if (count > 0) {
+            toast({ title: t('simap.downloadComplete'), description: `${count} ${t('simap.docsAvailable')}` });
+          }
+        }).catch((err) => {
+          console.warn('SIMAP document download failed:', err);
+          toast({ title: t('simap.downloadFailed'), description: err.message, variant: 'destructive' });
+        });
+
+        toast({
+          title: t('discover.imported'),
+          description: `${t('discover.importedDescription')} — ${t('simap.downloading')}`,
+        });
+      } else {
+        toast({
+          title: t('discover.imported'),
+          description: t('discover.importedDescription'),
+        });
+      }
 
       navigate(`/tenders/${tender.id}`);
     } catch (err: any) {
       toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
     } finally {
       setImportingId(null);
+    }
+  };
+
+  const toggleDocSelection = (docId: string) => {
+    setSelectedDocIds(prev => {
+      const next = new Set(prev);
+      if (next.has(docId)) next.delete(docId);
+      else next.add(docId);
+      return next;
+    });
+  };
+
+  const toggleAllDocs = () => {
+    if (selectedDocIds.size === simapDocuments.length) {
+      setSelectedDocIds(new Set());
+    } else {
+      setSelectedDocIds(new Set(simapDocuments.map(d => d.id)));
     }
   };
 
@@ -270,7 +384,20 @@ export default function SIMAPDiscovery() {
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold truncate">{item.title}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold truncate">{item.title}</h3>
+                    {item.has_documents && (
+                      isAuthenticated ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded shrink-0" title={t('simap.docsAvailable')}>
+                          <Paperclip className="h-3 w-3" />
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0" title={t('simap.docsLocked')}>
+                          <Lock className="h-3 w-3" />
+                        </span>
+                      )
+                    )}
+                  </div>
                   {item.issuer && (
                     <div className="flex items-center gap-1.5 mt-1">
                       <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -368,6 +495,86 @@ export default function SIMAPDiscovery() {
           description={t('discover.subtitle')}
         />
       )}
+
+      {/* Document Picker Dialog */}
+      <AlertDialog open={docPickerOpen} onOpenChange={(open) => { if (!open) { setDocPickerOpen(false); setDocPickerTarget(null); } }}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('simap.selectDocs')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {loadingDocs
+                ? t('simap.loadingDocs')
+                : simapDocuments.length > 0
+                  ? `${simapDocuments.length} ${t('simap.docsAvailable')} — ${t('simap.selectDocsDesc')}`
+                  : t('simap.noDocsFound')
+              }
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {loadingDocs ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : simapDocuments.length > 0 ? (
+            <div className="space-y-1 max-h-64 overflow-y-auto">
+              <label className="flex items-center gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer border-b border-border/50 mb-1">
+                <input
+                  type="checkbox"
+                  checked={selectedDocIds.size === simapDocuments.length}
+                  onChange={toggleAllDocs}
+                  className="rounded"
+                />
+                <span className="text-xs font-medium text-muted-foreground">
+                  {selectedDocIds.size === simapDocuments.length ? 'Deselect all' : 'Select all'}
+                </span>
+              </label>
+              {simapDocuments.map(doc => (
+                <label key={doc.id} className="flex items-center gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedDocIds.has(doc.id)}
+                    onChange={() => toggleDocSelection(doc.id)}
+                    className="rounded"
+                  />
+                  <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="text-sm truncate flex-1">{doc.name}</span>
+                  {doc.size && (
+                    <span className="text-xs text-muted-foreground shrink-0">{formatFileSize(doc.size)}</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          ) : null}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            {docPickerTarget && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => proceedImport(docPickerTarget, [])}
+                  disabled={!!importingId}
+                >
+                  {t('simap.skipDocs')}
+                </Button>
+                {simapDocuments.length > 0 && (
+                  <AlertDialogAction
+                    onClick={() => proceedImport(docPickerTarget, [...selectedDocIds])}
+                    disabled={selectedDocIds.size === 0 || !!importingId}
+                  >
+                    {importingId ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                    ) : (
+                      <FolderPlus className="h-4 w-4 mr-1.5" />
+                    )}
+                    {t('simap.importWithDocs')} ({selectedDocIds.size})
+                  </AlertDialogAction>
+                )}
+              </>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

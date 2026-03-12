@@ -13,7 +13,7 @@ import {
   Clock, Shield, Calendar, Target, Gauge, ThumbsUp, ThumbsDown, Minus,
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
   Check, X as XIcon, Sparkles, FileSpreadsheet, Download, HelpCircle, Trash2,
-  UserCircle2, Filter, MessageSquare, Send, Play, ChevronDown, ChevronUp, ExternalLink,
+  UserCircle2, Filter, MessageSquare, Send, Play, ChevronDown, ChevronUp, ExternalLink, Paperclip,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -25,6 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { callEdgeFunction } from '@/lib/edgeFunctions';
 import { format, formatDistanceToNow } from 'date-fns';
 import { de, enUS } from 'date-fns/locale';
 import type { Tables } from '@/integrations/supabase/types';
@@ -133,6 +134,14 @@ export default function TenderWorkspace() {
   const [loadingComments, setLoadingComments] = useState<string | null>(null);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
 
+  // SIMAP document download state
+  const [simapDocsLoading, setSimapDocsLoading] = useState(false);
+  const [simapDocList, setSimapDocList] = useState<any[]>([]);
+  const [simapDocPickerOpen, setSimapDocPickerOpen] = useState(false);
+  const [simapSelectedIds, setSimapSelectedIds] = useState<Set<string>>(new Set());
+  const [simapDownloading, setSimapDownloading] = useState(false);
+  const [simapAuthenticated, setSimapAuthenticated] = useState(false);
+
   const loadData = useCallback(async () => {
     if (!id) return;
     const [tRes, dRes, rRes, rkRes, dlRes, sRes, cRes, mRes, clRes] = await Promise.all([
@@ -190,6 +199,64 @@ export default function TenderWorkspace() {
   useEffect(() => {
     loadData().then(() => setLoading(false));
   }, [loadData]);
+
+  // Check SIMAP auth status for SIMAP-sourced tenders
+  useEffect(() => {
+    if (tender?.simap_project_id) {
+      callEdgeFunction('simap-auth', { action: 'status' })
+        .then(r => setSimapAuthenticated(r.connected === true))
+        .catch(() => setSimapAuthenticated(false));
+    }
+  }, [tender?.simap_project_id]);
+
+  const handleDownloadSimapDocs = async () => {
+    if (!tender?.simap_project_id) return;
+    setSimapDocsLoading(true);
+    setSimapDocPickerOpen(true);
+    setSimapDocList([]);
+    setSimapSelectedIds(new Set());
+    try {
+      const result = await callEdgeFunction('simap-documents', {
+        action: 'list',
+        simap_project_id: tender.simap_project_id,
+      });
+      const docs = result.documents || [];
+      setSimapDocList(docs);
+      setSimapSelectedIds(new Set(docs.map((d: any) => d.id)));
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+      setSimapDocPickerOpen(false);
+    } finally {
+      setSimapDocsLoading(false);
+    }
+  };
+
+  const handleSimapDocDownload = async () => {
+    if (!tender?.simap_project_id || !id || simapSelectedIds.size === 0) return;
+    setSimapDownloading(true);
+    try {
+      const result = await callEdgeFunction('simap-documents', {
+        action: 'download-all',
+        simap_project_id: tender.simap_project_id,
+        tender_id: id,
+        document_ids: [...simapSelectedIds],
+      });
+      const count = result.documents?.length || 0;
+      toast({ title: t('simap.downloadComplete'), description: `${count} ${t('simap.docsAvailable')}` });
+      setSimapDocPickerOpen(false);
+      // Reload docs
+      const { data: newDocs } = await supabase
+        .from('tender_documents')
+        .select('*')
+        .eq('tender_id', id)
+        .order('created_at', { ascending: true });
+      if (newDocs) setDocs(newDocs);
+    } catch (err: any) {
+      toast({ title: t('simap.downloadFailed'), description: err.message, variant: 'destructive' });
+    } finally {
+      setSimapDownloading(false);
+    }
+  };
 
   const logActivity = async (actionType: string, payload: Record<string, unknown> = {}) => {
     if (!user || !tender?.organization_id || !id) return;
@@ -1448,7 +1515,17 @@ export default function TenderWorkspace() {
         {/* DOCUMENTS */}
         {activeTab === 'documents' && (
           docs.length === 0 ? (
-            <EmptyState icon={FileText} title={t('workspace.noDocuments')} />
+            <div className="space-y-4">
+              {tender?.simap_project_id && simapAuthenticated && (
+                <div className="flex justify-center">
+                  <Button size="sm" onClick={handleDownloadSimapDocs} disabled={simapDocsLoading}>
+                    {simapDocsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Paperclip className="h-3.5 w-3.5 mr-1.5" />}
+                    {t('simap.downloadDocs')}
+                  </Button>
+                </div>
+              )}
+              <EmptyState icon={FileText} title={t('workspace.noDocuments')} />
+            </div>
           ) : (
             <div className="space-y-4">
               {/* Document stats bar */}
@@ -1460,10 +1537,18 @@ export default function TenderWorkspace() {
                   {pendingDocs > 0 && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-warning animate-spin" />{pendingDocs} processing</span>}
                   {failedDocs > 0 && <span className="flex items-center gap-1"><XCircle className="h-3 w-3 text-destructive" />{failedDocs} failed</span>}
                 </div>
-                <Button size="sm" variant="outline" onClick={handleReprocessDocuments} disabled={reprocessing}>
-                  {reprocessing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
-                  Reprocess Documents
-                </Button>
+                <div className="flex items-center gap-2">
+                  {tender?.simap_project_id && simapAuthenticated && (
+                    <Button size="sm" variant="outline" onClick={handleDownloadSimapDocs} disabled={simapDocsLoading}>
+                      {simapDocsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Paperclip className="h-3.5 w-3.5 mr-1.5" />}
+                      {t('simap.downloadDocs')}
+                    </Button>
+                  )}
+                  <Button size="sm" variant="outline" onClick={handleReprocessDocuments} disabled={reprocessing}>
+                    {reprocessing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                    Reprocess Documents
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -2421,6 +2506,81 @@ export default function TenderWorkspace() {
               {deletingDoc && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
               {t('workspace.deleteDocument')}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* SIMAP Document Picker Dialog */}
+      <AlertDialog open={simapDocPickerOpen} onOpenChange={(open) => { if (!open && !simapDownloading) setSimapDocPickerOpen(false); }}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('simap.selectDocs')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {simapDocsLoading
+                ? t('simap.loadingDocs')
+                : simapDocList.length > 0
+                  ? `${simapDocList.length} ${t('simap.docsAvailable')}`
+                  : t('simap.noDocsFound')
+              }
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {simapDocsLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : simapDocList.length > 0 ? (
+            <div className="space-y-1 max-h-64 overflow-y-auto">
+              <label className="flex items-center gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer border-b border-border/50 mb-1">
+                <input
+                  type="checkbox"
+                  checked={simapSelectedIds.size === simapDocList.length}
+                  onChange={() => {
+                    if (simapSelectedIds.size === simapDocList.length) setSimapSelectedIds(new Set());
+                    else setSimapSelectedIds(new Set(simapDocList.map((d: any) => d.id)));
+                  }}
+                  className="rounded"
+                />
+                <span className="text-xs font-medium text-muted-foreground">
+                  {simapSelectedIds.size === simapDocList.length ? 'Deselect all' : 'Select all'}
+                </span>
+              </label>
+              {simapDocList.map((doc: any) => (
+                <label key={doc.id} className="flex items-center gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={simapSelectedIds.has(doc.id)}
+                    onChange={() => {
+                      setSimapSelectedIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(doc.id)) next.delete(doc.id);
+                        else next.add(doc.id);
+                        return next;
+                      });
+                    }}
+                    className="rounded"
+                  />
+                  <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="text-sm truncate flex-1">{doc.name}</span>
+                  {doc.size && (
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {doc.size < 1024 * 1024 ? `${(doc.size / 1024).toFixed(0)} KB` : `${(doc.size / (1024 * 1024)).toFixed(1)} MB`}
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={simapDownloading}>{t('common.cancel')}</AlertDialogCancel>
+            {simapDocList.length > 0 && (
+              <AlertDialogAction
+                onClick={handleSimapDocDownload}
+                disabled={simapSelectedIds.size === 0 || simapDownloading}
+              >
+                {simapDownloading ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Download className="h-4 w-4 mr-1.5" />}
+                {t('simap.downloadDocs')} ({simapSelectedIds.size})
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

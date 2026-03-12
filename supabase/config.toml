@@ -71,3 +71,8 @@ entrypoint = "./functions/fetch-simap/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/simap-auth/index.ts"
+
+[functions.simap-documents]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/simap-documents/index.ts"
