@@ -346,8 +346,12 @@ serve(async (req: Request) => {
     if (url) contactInfo.url = url;
     console.log(`[fetch-simap] Contact info:`, contactInfo);
 
+    // Strip HTML tags from description
+    const stripHtmlTags = (s: string) => s.replace(/<[^>]*>/g, ' ').replace(/\s{2,}/g, ' ').trim();
+
     // Prefer real description from publication-details, fall back to synthetic
-    const finalDescription = realDescription || description || null;
+    const cleanRealDescription = realDescription ? stripHtmlTags(realDescription) : "";
+    const finalDescription = cleanRealDescription || description || null;
 
     return new Response(
       JSON.stringify({

@@ -105,6 +105,10 @@ function parseMatchReason(reason: string | null): { items: { key: string; value:
   return { items, aiReason };
 }
 
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/\s{2,}/g, ' ').trim();
+}
+
 export default function TenderWorkspace() {
   const { id } = useParams<{ id: string }>();
   const { t, language } = useI18n();
@@ -150,6 +154,9 @@ export default function TenderWorkspace() {
 
   // Requirement expansion state
   const [expandedReqId, setExpandedReqId] = useState<string | null>(null);
+
+  // Description expand state
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -1100,9 +1107,29 @@ export default function TenderWorkspace() {
               <span className="capitalize text-xs px-2 py-0.5 rounded bg-muted">{tender.source_type}</span>
               <span className="capitalize text-xs px-2 py-0.5 rounded bg-muted">{tender.tender_type}</span>
             </div>
-            {tender.description && (
-              <p className="text-sm text-muted-foreground mt-2 line-clamp-3">{tender.description}</p>
-            )}
+            {tender.description && (() => {
+              const cleanDesc = stripHtml(tender.description);
+              const isLong = cleanDesc.length > 200;
+              return (
+                <div className="mt-2">
+                  <p className={`text-sm text-muted-foreground ${!descriptionExpanded && isLong ? 'line-clamp-3' : ''}`}>
+                    {cleanDesc}
+                  </p>
+                  {isLong && (
+                    <button
+                      onClick={() => setDescriptionExpanded(!descriptionExpanded)}
+                      className="text-xs text-primary hover:underline mt-1 inline-flex items-center gap-1"
+                    >
+                      {descriptionExpanded ? (
+                        <>{t('workspace.showLess')} <ChevronUp className="h-3 w-3" /></>
+                      ) : (
+                        <>{t('workspace.showMore')} <ChevronDown className="h-3 w-3" /></>
+                      )}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
             {/* Metadata pills */}
             {(tender.canton || tender.process_type || tender.publication_number || (tender.cpv_codes && tender.cpv_codes.length > 0)) && (
               <div className="flex flex-wrap items-center gap-2 mt-2">
