@@ -1106,6 +1106,17 @@ export default function TenderWorkspace() {
               {tender.issuer && <span>{tender.issuer}</span>}
               <span className="capitalize text-xs px-2 py-0.5 rounded bg-muted">{tender.source_type}</span>
               <span className="capitalize text-xs px-2 py-0.5 rounded bg-muted">{tender.tender_type}</span>
+              {tender.simap_url && (
+                <a
+                  href={tender.simap_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Auf SIMAP öffnen
+                </a>
+              )}
             </div>
             {tender.description && (() => {
               const cleanDesc = stripHtml(tender.description);
