@@ -501,6 +501,20 @@ const translations = {
   'severity.medium': { de: 'Mittel', en: 'Medium' },
   'severity.high': { de: 'Hoch', en: 'High' },
   'severity.critical': { de: 'Kritisch', en: 'Critical' },
+
+  // Workspace: Document Upload
+  'workspace.uploadDocuments': { de: 'Dokumente hochladen', en: 'Upload documents' },
+  'workspace.uploadDocumentsHint': { de: 'PDF, DOCX, XLSX, ZIP', en: 'PDF, DOCX, XLSX, ZIP' },
+  'workspace.uploading': { de: 'Wird hochgeladen...', en: 'Uploading...' },
+  'workspace.uploadSuccess': { de: 'Dokumente hochgeladen', en: 'Documents uploaded' },
+  'workspace.uploadSuccessDesc': { de: 'Dokumente werden verarbeitet', en: 'Documents are being processed' },
+
+  // Workspace: Requirement Explanations
+  'workspace.noMatchesFound': { de: 'Keine passenden Wissenseinträge gefunden', en: 'No matching knowledge entries found' },
+  'workspace.noMatchesHint': { de: 'Laden Sie relevante Dokumente in die Wissensdatenbank hoch.', en: 'Upload relevant documents to the knowledge base.' },
+
+  // Workspace: Contact Info
+  'workspace.contactInfo': { de: 'Kontaktinformationen', en: 'Contact Information' },
 } as const;
 
 type TranslationKey = keyof typeof translations;

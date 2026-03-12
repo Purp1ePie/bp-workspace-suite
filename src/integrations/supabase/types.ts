@@ -587,6 +587,9 @@ export type Database = {
       tenders: {
         Row: {
           bid_decision: string | null
+          canton: string | null
+          contact_info: Record<string, any> | null
+          cpv_codes: string[] | null
           created_at: string
           deadline: string | null
           description: string | null
@@ -595,6 +598,8 @@ export type Database = {
           issuer: string | null
           language: string | null
           organization_id: string
+          process_type: string | null
+          publication_number: string | null
           simap_project_id: string | null
           simap_url: string | null
           source_type: string
@@ -605,6 +610,9 @@ export type Database = {
         }
         Insert: {
           bid_decision?: string | null
+          canton?: string | null
+          contact_info?: Record<string, any> | null
+          cpv_codes?: string[] | null
           created_at?: string
           deadline?: string | null
           description?: string | null
@@ -613,6 +621,8 @@ export type Database = {
           issuer?: string | null
           language?: string | null
           organization_id: string
+          process_type?: string | null
+          publication_number?: string | null
           simap_project_id?: string | null
           simap_url?: string | null
           source_type: string
@@ -623,6 +633,9 @@ export type Database = {
         }
         Update: {
           bid_decision?: string | null
+          canton?: string | null
+          contact_info?: Record<string, any> | null
+          cpv_codes?: string[] | null
           created_at?: string
           deadline?: string | null
           description?: string | null
@@ -631,6 +644,8 @@ export type Database = {
           issuer?: string | null
           language?: string | null
           organization_id?: string
+          process_type?: string | null
+          publication_number?: string | null
           simap_project_id?: string | null
           simap_url?: string | null
           source_type?: string

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
@@ -14,6 +14,7 @@ import {
   Loader2, Info, RefreshCw, CheckCircle2, XCircle, Circle, Hash, Tag,
   Check, X as XIcon, Sparkles, FileSpreadsheet, Download, HelpCircle, Trash2,
   UserCircle2, Filter, MessageSquare, Send, Play, ChevronDown, ChevronUp, ExternalLink, Paperclip,
+  Upload, Mail, Phone, Globe,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -141,6 +142,14 @@ export default function TenderWorkspace() {
   const [simapSelectedIds, setSimapSelectedIds] = useState<Set<string>>(new Set());
   const [simapDownloading, setSimapDownloading] = useState(false);
   const [simapAuthenticated, setSimapAuthenticated] = useState(false);
+
+  // Document upload state
+  const [uploadingDocs, setUploadingDocs] = useState(false);
+  const [docDragOver, setDocDragOver] = useState(false);
+  const docFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Requirement expansion state
+  const [expandedReqId, setExpandedReqId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -499,6 +508,56 @@ export default function TenderWorkspace() {
     } finally {
       setReprocessing(false);
     }
+  };
+
+  // Document upload handler
+  const handleDocUpload = async (files: FileList | File[]) => {
+    if (!id || !tender) return;
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+    setUploadingDocs(true);
+    try {
+      const { data: orgData } = await supabase.rpc('current_organization_id');
+      if (!orgData) throw new Error('No organization found');
+
+      for (const file of fileArray) {
+        const path = `${orgData}/${id}/${crypto.randomUUID()}_${file.name}`;
+        const { error: uploadErr } = await supabase.storage.from('tender-files').upload(path, file);
+        if (!uploadErr) {
+          await supabase.from('tender_documents').insert({
+            tender_id: id,
+            organization_id: orgData,
+            file_name: file.name,
+            file_type: file.type || null,
+            storage_path: path,
+            parse_status: 'pending',
+          });
+        }
+      }
+
+      toast({ title: t('workspace.uploadSuccess'), description: t('workspace.uploadSuccessDesc') });
+      await loadData();
+
+      // Trigger processing chain (non-blocking)
+      try {
+        await callEdgeFunction('process-tender', { tender_id: id });
+        try { await callEdgeFunction('match-knowledge-assets', { tender_id: id }); } catch {}
+        try { await callEdgeFunction('generate-response', { tender_id: id }); } catch {}
+        await loadData();
+      } catch (err: any) {
+        console.warn('[BidPilot] Processing after upload failed:', err.message);
+      }
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingDocs(false);
+    }
+  };
+
+  const handleDocDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDocDragOver(false);
+    if (e.dataTransfer.files.length) handleDocUpload(e.dataTransfer.files);
   };
 
   const [matchingInProgress, setMatchingInProgress] = useState(false);
@@ -1044,6 +1103,52 @@ export default function TenderWorkspace() {
             {tender.description && (
               <p className="text-sm text-muted-foreground mt-2 line-clamp-3">{tender.description}</p>
             )}
+            {/* Metadata pills */}
+            {(tender.canton || tender.process_type || tender.publication_number || (tender.cpv_codes && tender.cpv_codes.length > 0)) && (
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                {tender.canton && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">{tender.canton}</span>
+                )}
+                {tender.process_type && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">{tender.process_type}</span>
+                )}
+                {tender.publication_number && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">Nr. {tender.publication_number}</span>
+                )}
+                {tender.cpv_codes && tender.cpv_codes.length > 0 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">CPV: {tender.cpv_codes.slice(0, 3).join(', ')}</span>
+                )}
+              </div>
+            )}
+            {/* Contact info */}
+            {tender.contact_info && Object.keys(tender.contact_info).length > 0 && (
+              <div className="mt-2 p-3 rounded-lg bg-muted/50 border border-border/50">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t('workspace.contactInfo')}</p>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-foreground/80">
+                  {tender.contact_info.name && (
+                    <span className="font-medium">{tender.contact_info.name}</span>
+                  )}
+                  {(tender.contact_info.street || tender.contact_info.city) && (
+                    <span>{[tender.contact_info.street, [tender.contact_info.zip, tender.contact_info.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</span>
+                  )}
+                  {tender.contact_info.email && (
+                    <a href={`mailto:${tender.contact_info.email}`} className="flex items-center gap-1 text-primary hover:underline">
+                      <Mail className="h-3 w-3" />{tender.contact_info.email}
+                    </a>
+                  )}
+                  {tender.contact_info.phone && (
+                    <a href={`tel:${tender.contact_info.phone}`} className="flex items-center gap-1 text-primary hover:underline">
+                      <Phone className="h-3 w-3" />{tender.contact_info.phone}
+                    </a>
+                  )}
+                  {tender.contact_info.url && (
+                    <a href={tender.contact_info.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-primary hover:underline">
+                      <Globe className="h-3 w-3" />{new URL(tender.contact_info.url).hostname}
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <StatusBadge status={tender.status} />
@@ -1514,74 +1619,103 @@ export default function TenderWorkspace() {
 
         {/* DOCUMENTS */}
         {activeTab === 'documents' && (
-          docs.length === 0 ? (
-            <div className="space-y-4">
-              {tender?.simap_project_id && simapAuthenticated && (
-                <div className="flex justify-center">
-                  <Button size="sm" onClick={handleDownloadSimapDocs} disabled={simapDocsLoading}>
-                    {simapDocsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Paperclip className="h-3.5 w-3.5 mr-1.5" />}
-                    {t('simap.downloadDocs')}
-                  </Button>
-                </div>
+          <div className="space-y-4">
+            {/* Upload zone */}
+            <div
+              onClick={() => !uploadingDocs && docFileInputRef.current?.click()}
+              onDrop={handleDocDrop}
+              onDragOver={(e) => { e.preventDefault(); setDocDragOver(true); }}
+              onDragLeave={() => setDocDragOver(false)}
+              className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+                docDragOver
+                  ? 'border-primary bg-primary/5 scale-[1.01]'
+                  : 'border-border hover:border-primary/50 hover:bg-accent/30'
+              } ${uploadingDocs ? 'pointer-events-none opacity-60' : ''}`}
+            >
+              {uploadingDocs ? (
+                <>
+                  <Loader2 className="h-8 w-8 mx-auto mb-2 text-primary animate-spin" />
+                  <p className="text-sm font-medium text-foreground">{t('workspace.uploading')}</p>
+                </>
+              ) : (
+                <>
+                  <Upload className={`h-8 w-8 mx-auto mb-2 transition-colors ${docDragOver ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <p className="text-sm font-medium text-foreground">
+                    {docDragOver ? t('tender.dropFilesActive') : t('workspace.uploadDocuments')}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">{t('workspace.uploadDocumentsHint')}</p>
+                </>
               )}
-              <EmptyState icon={FileText} title={t('workspace.noDocuments')} />
+              <input
+                ref={docFileInputRef}
+                type="file"
+                multiple
+                onChange={(e) => { if (e.target.files?.length) { handleDocUpload(e.target.files); e.target.value = ''; } }}
+                className="hidden"
+              />
             </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Document stats bar */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  <span>{docs.length} {t('workspace.documents').toLowerCase()}</span>
-                  <span className="w-px h-3 bg-border" />
-                  <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-success" />{parsedDocs} parsed</span>
-                  {pendingDocs > 0 && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-warning animate-spin" />{pendingDocs} processing</span>}
-                  {failedDocs > 0 && <span className="flex items-center gap-1"><XCircle className="h-3 w-3 text-destructive" />{failedDocs} failed</span>}
-                </div>
-                <div className="flex items-center gap-2">
-                  {tender?.simap_project_id && simapAuthenticated && (
-                    <Button size="sm" variant="outline" onClick={handleDownloadSimapDocs} disabled={simapDocsLoading}>
-                      {simapDocsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Paperclip className="h-3.5 w-3.5 mr-1.5" />}
-                      {t('simap.downloadDocs')}
-                    </Button>
-                  )}
+
+            {/* SIMAP download button */}
+            {tender?.simap_project_id && simapAuthenticated && (
+              <div className="flex justify-center">
+                <Button size="sm" variant="outline" onClick={handleDownloadSimapDocs} disabled={simapDocsLoading}>
+                  {simapDocsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Paperclip className="h-3.5 w-3.5 mr-1.5" />}
+                  {t('simap.downloadDocs')}
+                </Button>
+              </div>
+            )}
+
+            {docs.length === 0 ? (
+              <EmptyState icon={FileText} title={t('workspace.noDocuments')} />
+            ) : (
+              <>
+                {/* Document stats bar */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <span>{docs.length} {t('workspace.documents').toLowerCase()}</span>
+                    <span className="w-px h-3 bg-border" />
+                    <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-success" />{parsedDocs} parsed</span>
+                    {pendingDocs > 0 && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 text-warning animate-spin" />{pendingDocs} processing</span>}
+                    {failedDocs > 0 && <span className="flex items-center gap-1"><XCircle className="h-3 w-3 text-destructive" />{failedDocs} failed</span>}
+                  </div>
                   <Button size="sm" variant="outline" onClick={handleReprocessDocuments} disabled={reprocessing}>
                     {reprocessing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
                     Reprocess Documents
                   </Button>
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                {docs.map(d => {
-                  const cfg = parseStatusConfig[d.parse_status] || parseStatusConfig.pending;
-                  const StatusIcon = cfg.icon;
-                  return (
-                    <div key={d.id} className="glass-card px-5 py-4 flex items-center gap-4 hover:border-primary/20 transition-colors">
-                      <div className="rounded-lg bg-primary/10 p-2.5 shrink-0">
-                        <FileText className="h-4 w-4 text-primary" />
+                <div className="space-y-2">
+                  {docs.map(d => {
+                    const cfg = parseStatusConfig[d.parse_status] || parseStatusConfig.pending;
+                    const StatusIcon = cfg.icon;
+                    return (
+                      <div key={d.id} className="glass-card px-5 py-4 flex items-center gap-4 hover:border-primary/20 transition-colors">
+                        <div className="rounded-lg bg-primary/10 p-2.5 shrink-0">
+                          <FileText className="h-4 w-4 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{d.file_name}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {d.file_type || 'document'} · {format(new Date(d.created_at), 'dd MMM yyyy, HH:mm', { locale: dateFnsLocale })}
+                          </p>
+                        </div>
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium inline-flex items-center gap-1.5 shrink-0 ${cfg.color}`}>
+                          <StatusIcon className={`h-3 w-3 ${d.parse_status === 'processing' ? 'animate-spin' : ''}`} />
+                          {t(`workspace.parseStatus.${d.parse_status}` as any) || d.parse_status}
+                        </span>
+                        <button
+                          onClick={() => setDeleteDocTarget(d)}
+                          className="text-muted-foreground hover:text-destructive transition-colors p-1.5 rounded hover:bg-destructive/10 shrink-0"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{d.file_name}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {d.file_type || 'document'} · {format(new Date(d.created_at), 'dd MMM yyyy, HH:mm', { locale: dateFnsLocale })}
-                        </p>
-                      </div>
-                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium inline-flex items-center gap-1.5 shrink-0 ${cfg.color}`}>
-                        <StatusIcon className={`h-3 w-3 ${d.parse_status === 'processing' ? 'animate-spin' : ''}`} />
-                        {t(`workspace.parseStatus.${d.parse_status}` as any) || d.parse_status}
-                      </span>
-                      <button
-                        onClick={() => setDeleteDocTarget(d)}
-                        className="text-muted-foreground hover:text-destructive transition-colors p-1.5 rounded hover:bg-destructive/10 shrink-0"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
         )}
 
         {/* REQUIREMENTS */}
@@ -1624,11 +1758,18 @@ export default function TenderWorkspace() {
                   const isFulfilled = fulfilledReqIds.has(r.id);
                   const reqMatches = matches.filter(m => m.requirement_id === r.id && m.status !== 'rejected');
                   const bestScore = reqMatches.length > 0 ? Math.max(...reqMatches.map(m => m.confidence_score ?? 0)) : 0;
+                  const isExpanded = expandedReqId === r.id;
 
                   return (
-                    <div key={r.id} className={`glass-card px-5 py-4 hover:border-primary/20 transition-colors ${
-                      matches.length > 0 ? (isFulfilled ? 'border-l-2 border-l-success/50' : 'border-l-2 border-l-destructive/30') : ''
-                    }`}>
+                    <div
+                      key={r.id}
+                      onClick={() => matches.length > 0 && setExpandedReqId(isExpanded ? null : r.id)}
+                      className={`glass-card px-5 py-4 transition-all ${
+                        matches.length > 0 ? 'cursor-pointer hover:border-primary/20' : ''
+                      } ${
+                        matches.length > 0 ? (isFulfilled ? 'border-l-2 border-l-success/50' : 'border-l-2 border-l-destructive/30') : ''
+                      }`}
+                    >
                       <div className="flex items-start gap-3">
                         <span className="flex items-center justify-center h-6 w-6 rounded bg-muted text-[10px] font-bold text-muted-foreground shrink-0 mt-0.5">
                           {idx + 1}
@@ -1662,7 +1803,49 @@ export default function TenderWorkspace() {
                             )}
                           </div>
                         </div>
+                        {matches.length > 0 && (
+                          <div className="shrink-0 mt-0.5 text-muted-foreground">
+                            {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                          </div>
+                        )}
                       </div>
+
+                      {/* Expanded explanation */}
+                      {isExpanded && (
+                        <div className="mt-3 pt-3 border-t border-border/50 ml-9">
+                          {reqMatches.length > 0 ? (
+                            <div className="space-y-2.5">
+                              {reqMatches.slice(0, 3).map(m => {
+                                const { aiReason } = parseMatchReason(m.match_reason);
+                                const asset = knowledgeAssets.find(a => a.id === m.knowledge_asset_id);
+                                return (
+                                  <div key={m.id} className="flex items-start gap-2 text-xs">
+                                    <CheckCircle2 className="h-3 w-3 text-primary mt-0.5 shrink-0" />
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        {asset && <span className="font-medium text-foreground">{asset.title}</span>}
+                                        <span className="text-muted-foreground">({m.confidence_score}%)</span>
+                                      </div>
+                                      {aiReason && (
+                                        <p className="text-muted-foreground mt-0.5 italic leading-relaxed">{aiReason}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              {reqMatches.length > 3 && (
+                                <p className="text-[10px] text-muted-foreground">
+                                  +{reqMatches.length - 3} weitere Matches
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground italic">
+                              {t('workspace.noMatchesFound')} {t('workspace.noMatchesHint')}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

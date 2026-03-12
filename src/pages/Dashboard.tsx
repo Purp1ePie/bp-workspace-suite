@@ -221,6 +221,11 @@ export default function Dashboard() {
           organization_id: orgData,
           simap_url: item.simap_url,
           simap_project_id: item.project_id,
+          contact_info: richData?.contact_info || null,
+          canton: richData?.canton || null,
+          cpv_codes: richData?.cpv_codes || [],
+          publication_number: richData?.publication_number || null,
+          process_type: richData?.process_type || null,
         })
         .select()
         .single();

@@ -326,6 +326,26 @@ serve(async (req: Request) => {
 
     const tenderType = "public"; // SIMAP is public procurement
 
+    // Extract contact info from orderAddress
+    const addr = project.orderAddress || {};
+    const pubAddr = pubDetail?.procurement?.orderAddress || pubDetail?.procurement?.procurementAddress || {};
+    const contactInfo: Record<string, string> = {};
+    const contactName = pickTranslation(addr.name) || pickTranslation(pubAddr.name) || "";
+    if (contactName) contactInfo.name = contactName;
+    const street = addr.street || pubAddr.street || "";
+    if (street) contactInfo.street = street;
+    const zip = addr.zip || addr.postalCode || pubAddr.zip || pubAddr.postalCode || "";
+    if (zip) contactInfo.zip = zip;
+    const city = pickTranslation(addr.city) || addr.town || pickTranslation(pubAddr.city) || pubAddr.town || "";
+    if (city) contactInfo.city = city;
+    const email = addr.email || pubAddr.email || "";
+    if (email) contactInfo.email = email;
+    const phone = addr.phone || addr.telephone || pubAddr.phone || pubAddr.telephone || "";
+    if (phone) contactInfo.phone = phone;
+    const url = addr.url || addr.website || pubAddr.url || pubAddr.website || "";
+    if (url) contactInfo.url = url;
+    console.log(`[fetch-simap] Contact info:`, contactInfo);
+
     // Prefer real description from publication-details, fall back to synthetic
     const finalDescription = realDescription || description || null;
 
@@ -348,6 +368,7 @@ serve(async (req: Request) => {
           simap_project_id: resolvedId,
           has_documents: project.hasProjectDocuments || false,
           simap_url: simap_url || `https://www.simap.ch/${language}/project-detail/${resolvedId}`,
+          contact_info: Object.keys(contactInfo).length > 0 ? contactInfo : null,
           raw_data: project,
         },
       }),
