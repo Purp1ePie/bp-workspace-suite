@@ -25,7 +25,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  User, Users, Building2, Shield, Mail, Loader2, Save, UserPlus, Trash2, Crown,
+  User, Users, Building2, Shield, Mail, Loader2, Save, UserPlus, Trash2, Crown, X,
 } from 'lucide-react';
 import type { Tables } from '@/integrations/supabase/types';
 
@@ -54,6 +54,8 @@ export default function Settings() {
   const [orgIndustry, setOrgIndustry] = useState('');
   const [orgSize, setOrgSize] = useState('');
   const [orgLang, setOrgLang] = useState('de');
+  const [simapKeywords, setSimapKeywords] = useState<string[]>([]);
+  const [keywordInput, setKeywordInput] = useState('');
   const [savingOrg, setSavingOrg] = useState(false);
 
   // Team state
@@ -92,6 +94,7 @@ export default function Settings() {
           setOrgIndustry(o.industry || '');
           setOrgSize(o.size_label || '');
           setOrgLang(o.default_language || 'de');
+          setSimapKeywords(o.simap_keywords || []);
         }
 
         // Load team members
@@ -142,6 +145,7 @@ export default function Settings() {
         industry: orgIndustry.trim() || null,
         size_label: orgSize || null,
         default_language: orgLang,
+        simap_keywords: simapKeywords.length > 0 ? simapKeywords : null,
       })
       .eq('id', org.id);
 
@@ -417,6 +421,59 @@ export default function Settings() {
                 placeholder={language === 'de' ? 'z.B. IT, Bau, Beratung' : 'e.g. IT, Construction, Consulting'}
                 className="mt-1.5"
               />
+            </div>
+            <div>
+              <Label>{t('settings.simapKeywords')}</Label>
+              <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+                {t('settings.simapKeywordsHint')}
+              </p>
+              {simapKeywords.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {simapKeywords.map((kw, i) => (
+                    <Badge key={i} variant="secondary" className="gap-1 pr-1">
+                      {kw}
+                      <button
+                        type="button"
+                        onClick={() => setSimapKeywords(simapKeywords.filter((_, idx) => idx !== i))}
+                        className="ml-0.5 hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Input
+                  value={keywordInput}
+                  onChange={e => setKeywordInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && keywordInput.trim().length >= 3) {
+                      e.preventDefault();
+                      if (!simapKeywords.includes(keywordInput.trim())) {
+                        setSimapKeywords([...simapKeywords, keywordInput.trim()]);
+                      }
+                      setKeywordInput('');
+                    }
+                  }}
+                  placeholder={language === 'de' ? 'z.B. IT Dienstleistungen, Software' : 'e.g. IT Services, Software'}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={keywordInput.trim().length < 3}
+                  onClick={() => {
+                    if (keywordInput.trim().length >= 3 && !simapKeywords.includes(keywordInput.trim())) {
+                      setSimapKeywords([...simapKeywords, keywordInput.trim()]);
+                    }
+                    setKeywordInput('');
+                  }}
+                >
+                  +
+                </Button>
+              </div>
             </div>
             <div>
               <Label>{t('onboarding.size')}</Label>

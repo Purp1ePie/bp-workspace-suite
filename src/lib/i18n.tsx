@@ -60,6 +60,13 @@ const translations = {
   'dashboard.documentsUploaded': { de: 'Dokumente', en: 'Documents' },
   'dashboard.openItems': { de: 'Offene Punkte', en: 'Open Items' },
   'dashboard.viewAll': { de: 'Alle anzeigen', en: 'View all' },
+  'dashboard.showAllDeadlines': { de: 'Alle {count} Fristen anzeigen', en: 'Show all {count} deadlines' },
+  'dashboard.showLessDeadlines': { de: 'Weniger anzeigen', en: 'Show less' },
+  'dashboard.recommendedTenders': { de: 'Empfohlene Ausschreibungen', en: 'Recommended Tenders' },
+  'dashboard.refreshSimap': { de: 'Aktualisieren', en: 'Refresh' },
+  'dashboard.noSimapResults': { de: 'Keine Empfehlungen', en: 'No recommendations' },
+  'dashboard.noSimapResultsHint': { de: 'Konfigurieren Sie SIMAP-Suchbegriffe in den Einstellungen', en: 'Configure SIMAP search terms in Settings' },
+  'dashboard.configureKeywords': { de: 'Suchbegriffe konfigurieren', en: 'Configure keywords' },
 
   // Tender
   'tender.new': { de: 'Neue Ausschreibung', en: 'New Tender' },
@@ -258,6 +265,8 @@ const translations = {
   'settings.email': { de: 'E-Mail', en: 'Email' },
   'settings.orgDescription': { de: 'Verwalten Sie Ihre Organisationseinstellungen', en: 'Manage your organization settings' },
   'settings.orgSaved': { de: 'Organisation gespeichert', en: 'Organization saved' },
+  'settings.simapKeywords': { de: 'SIMAP-Suchbegriffe', en: 'SIMAP Search Keywords' },
+  'settings.simapKeywordsHint': { de: 'Suchbegriffe für automatische SIMAP-Empfehlungen auf dem Dashboard. Mind. 3 Zeichen pro Begriff.', en: 'Search keywords for automatic SIMAP recommendations on the dashboard. Min. 3 characters per term.' },
   'settings.inviteMember': { de: 'Mitglied einladen', en: 'Invite Member' },
   'settings.inviteHint': { de: 'Laden Sie Teammitglieder per E-Mail ein', en: 'Invite team members by email' },
   'settings.invite': { de: 'Einladen', en: 'Invite' },

@@ -1,15 +1,17 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/lib/i18n';
 import { useAuth } from '@/hooks/useAuth';
 import { StatusBadge } from '@/components/StatusBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
+import { callEdgeFunction } from '@/lib/edgeFunctions';
 import {
   FolderPlus, Clock, Upload, BarChart3, ArrowRight,
   Folders, CalendarClock, FileText, CheckSquare,
   Gauge, Target, Users, TrendingUp, ChevronDown, ChevronUp,
+  Compass, RefreshCw, ExternalLink, Building2, MapPin, Loader2,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -38,6 +40,14 @@ export default function Dashboard() {
   const [members, setMembers] = useState<MemberSlim[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedStage, setExpandedStage] = useState<string | null>(null);
+  const [deadlinesExpanded, setDeadlinesExpanded] = useState(false);
+  // SIMAP ticker state
+  const [simapResults, setSimapResults] = useState<any[]>([]);
+  const [simapLoading, setSimapLoading] = useState(false);
+  const [simapKeywords, setSimapKeywords] = useState<string[]>([]);
+  const [importingSimapId, setImportingSimapId] = useState<string | null>(null);
+  const [simapRefreshCounter, setSimapRefreshCounter] = useState(0);
+  const navigate = useNavigate();
   const { toast } = useToast();
 
   // Status change handler for pipeline
@@ -100,8 +110,141 @@ export default function Dashboard() {
     load();
   }, [user]);
 
+  // SIMAP ticker — separate effect, non-blocking
+  useEffect(() => {
+    const loadSimapRecommendations = async () => {
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
+      if (!profile?.organization_id) return;
+
+      const { data: org } = await supabase
+        .from('organizations')
+        .select('simap_keywords')
+        .eq('id', profile.organization_id)
+        .single();
+
+      const keywords: string[] = org?.simap_keywords || [];
+      setSimapKeywords(keywords);
+      if (keywords.length === 0) return;
+
+      // Check localStorage cache
+      const cacheKey = `bidpilot-simap-ticker-${profile.organization_id}`;
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          const age = Date.now() - parsed.timestamp;
+          if (age < 30 * 60 * 1000 && JSON.stringify(parsed.keywords) === JSON.stringify(keywords)) {
+            setSimapResults(parsed.results);
+            return;
+          }
+        } catch { /* ignore bad cache */ }
+      }
+
+      setSimapLoading(true);
+      try {
+        const allResults: any[] = [];
+        const seenIds = new Set<string>();
+
+        for (const kw of keywords.slice(0, 3)) {
+          try {
+            const result = await callEdgeFunction('search-simap', { query: kw });
+            for (const r of (result.results || [])) {
+              if (!seenIds.has(r.project_id)) {
+                seenIds.add(r.project_id);
+                allResults.push(r);
+              }
+            }
+          } catch (err) {
+            console.warn(`SIMAP search failed for "${kw}":`, err);
+          }
+        }
+
+        // Sort by publication_date DESC, limit to 8
+        allResults.sort((a, b) => {
+          const da = a.publication_date ? new Date(a.publication_date).getTime() : 0;
+          const db = b.publication_date ? new Date(b.publication_date).getTime() : 0;
+          return db - da;
+        });
+        const limited = allResults.slice(0, 8);
+        setSimapResults(limited);
+
+        localStorage.setItem(cacheKey, JSON.stringify({
+          results: limited,
+          keywords,
+          timestamp: Date.now(),
+        }));
+      } catch (err) {
+        console.warn('SIMAP ticker load failed:', err);
+      } finally {
+        setSimapLoading(false);
+      }
+    };
+
+    loadSimapRecommendations();
+  }, [user, simapRefreshCounter]);
+
+  const handleSimapImport = async (item: any) => {
+    setImportingSimapId(item.project_id);
+    try {
+      const { data: orgData } = await supabase.rpc('current_organization_id');
+      if (!orgData) throw new Error('No organization found');
+
+      let richData: any = null;
+      try {
+        const fetchResult = await callEdgeFunction('fetch-simap', {
+          simap_project_id: item.project_id,
+          simap_url: item.simap_url,
+          publication_id: item.publication_id,
+        });
+        richData = fetchResult.data;
+      } catch { /* fall back to search result data */ }
+
+      const { data: tender, error } = await supabase
+        .from('tenders')
+        .insert({
+          title: richData?.title || item.title || `SIMAP ${item.project_id}`,
+          issuer: richData?.issuer || item.issuer || null,
+          description: richData?.description || item.description || null,
+          source_type: 'simap',
+          tender_type: 'public',
+          status: 'ready_for_review',
+          language: richData?.language || item.language || 'de',
+          deadline: (richData?.deadline || item.deadline)
+            ? new Date(richData?.deadline || item.deadline).toISOString()
+            : null,
+          organization_id: orgData,
+          simap_url: item.simap_url,
+          simap_project_id: item.project_id,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      toast({ title: t('discover.imported'), description: t('discover.importedDescription') });
+      navigate(`/tenders/${tender.id}`);
+    } catch (err: any) {
+      toast({ title: t('common.error'), description: err.message, variant: 'destructive' });
+    } finally {
+      setImportingSimapId(null);
+    }
+  };
+
+  const handleRefreshSimap = () => {
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('bidpilot-simap-ticker-'));
+    keys.forEach(k => localStorage.removeItem(k));
+    setSimapRefreshCounter(c => c + 1);
+  };
+
   const activeTenders = tenders.filter(t => ['new', 'in_progress'].includes(t.status));
   const dateFnsLocale = language === 'de' ? de : enUS;
+  const DEADLINES_COLLAPSED_COUNT = 5;
+  const visibleDeadlines = deadlinesExpanded ? deadlines : deadlines.slice(0, DEADLINES_COLLAPSED_COUNT);
 
   // Pipeline stages with target status for moving tenders
   const pipelineStages = useMemo(() => {
@@ -357,6 +500,100 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* SIMAP Recommended Tenders */}
+      {simapKeywords.length > 0 && (
+        <div className="glass-card">
+          <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <Compass className="h-4 w-4 text-primary shrink-0" />
+              <h2 className="font-semibold font-heading text-sm">{t('dashboard.recommendedTenders')}</h2>
+              <span className="text-xs text-muted-foreground truncate hidden sm:inline">
+                ({simapKeywords.join(', ')})
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={handleRefreshSimap}
+                disabled={simapLoading}
+                className="text-muted-foreground hover:text-primary transition-colors p-1"
+                title={t('dashboard.refreshSimap')}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${simapLoading ? 'animate-spin' : ''}`} />
+              </button>
+              <Link to="/discover" className="text-xs text-primary hover:underline">{t('dashboard.viewAll')}</Link>
+            </div>
+          </div>
+          {simapLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : simapResults.length === 0 ? (
+            <EmptyState
+              icon={Compass}
+              title={t('dashboard.noSimapResults')}
+              description={t('dashboard.noSimapResultsHint')}
+            />
+          ) : (
+            <div className="divide-y divide-border">
+              {simapResults.map(item => (
+                <div key={item.project_id} className="px-5 py-3 hover:bg-accent/30 transition-colors">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-sm font-medium truncate">{item.title}</h3>
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        {item.issuer && (
+                          <div className="flex items-center gap-1">
+                            <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                            <span className="text-xs text-muted-foreground truncate max-w-[200px]">{item.issuer}</span>
+                          </div>
+                        )}
+                        {item.canton && (
+                          <div className="flex items-center gap-1">
+                            <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
+                            <span className="text-xs text-muted-foreground">{item.canton}</span>
+                          </div>
+                        )}
+                        {item.deadline && (
+                          <div className="flex items-center gap-1">
+                            <Clock className="h-3 w-3 text-primary shrink-0" />
+                            <span className="text-xs text-primary font-medium">
+                              {format(new Date(item.deadline), 'dd.MM.yyyy')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <a
+                        href={item.simap_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-muted-foreground hover:text-primary transition-colors p-1"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleSimapImport(item)}
+                        disabled={importingSimapId === item.project_id}
+                      >
+                        {importingSimapId === item.project_id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                        ) : (
+                          <FolderPlus className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        {t('discover.import')}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Active Tenders */}
         <div className="glass-card">
@@ -412,19 +649,39 @@ export default function Dashboard() {
           {deadlines.length === 0 ? (
             <EmptyState icon={Clock} title={t('dashboard.noDeadlines')} />
           ) : (
-            <div className="divide-y divide-border">
-              {deadlines.map((dl) => (
-                <div key={dl.id} className="px-5 py-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">{dl.deadline_type}</p>
-                    <span className={`text-xs font-medium ${new Date(dl.due_at) < now ? 'text-destructive' : 'text-warning'}`}>
-                      {formatDistanceToNow(new Date(dl.due_at), { addSuffix: true, locale: dateFnsLocale })}
-                    </span>
+            <>
+              <div className="divide-y divide-border">
+                {visibleDeadlines.map((dl) => (
+                  <div key={dl.id} className="px-5 py-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">{dl.deadline_type}</p>
+                      <span className={`text-xs font-medium ${new Date(dl.due_at) < now ? 'text-destructive' : 'text-warning'}`}>
+                        {formatDistanceToNow(new Date(dl.due_at), { addSuffix: true, locale: dateFnsLocale })}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{dl.tender_title}</p>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{dl.tender_title}</p>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              {deadlines.length > DEADLINES_COLLAPSED_COUNT && (
+                <button
+                  onClick={() => setDeadlinesExpanded(!deadlinesExpanded)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs text-primary hover:bg-accent/30 transition-colors border-t border-border"
+                >
+                  {deadlinesExpanded ? (
+                    <>
+                      <ChevronUp className="h-3.5 w-3.5" />
+                      {t('dashboard.showLessDeadlines')}
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-3.5 w-3.5" />
+                      {t('dashboard.showAllDeadlines').replace('{count}', String(deadlines.length))}
+                    </>
+                  )}
+                </button>
+              )}
+            </>
           )}
         </div>
 

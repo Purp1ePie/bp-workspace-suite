@@ -259,6 +259,7 @@ export type Database = {
           id: string
           industry: string | null
           name: string
+          simap_keywords: string[] | null
           size_label: string | null
           updated_at: string
         }
@@ -268,6 +269,7 @@ export type Database = {
           id?: string
           industry?: string | null
           name: string
+          simap_keywords?: string[] | null
           size_label?: string | null
           updated_at?: string
         }
@@ -277,6 +279,7 @@ export type Database = {
           id?: string
           industry?: string | null
           name?: string
+          simap_keywords?: string[] | null
           size_label?: string | null
           updated_at?: string
         }
